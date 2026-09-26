@@ -29,12 +29,36 @@ class AESEngine:
 
     @staticmethod
     def wrap_key(K_shared: bytes, K_doc: bytes) -> bytes:
-        cipher = AES.new(K_shared, AES.MODE_WRAP)
-        W_u = cipher.encrypt(K_doc)
-        return W_u
+        mode = getattr(AES, 'MODE_KW', None)
+        if mode is not None:
+            cipher = AES.new(K_shared, mode)
+            if hasattr(cipher, 'seal'):
+                return cipher.seal(K_doc)
+            elif hasattr(cipher, 'encrypt'):
+                return cipher.encrypt(K_doc)
+        
+        # Fallback to AES-GCM key wrapping
+        nonce = get_random_bytes(12)
+        cipher = AES.new(K_shared, AES.MODE_GCM, nonce=nonce)
+        ciphertext, tag = cipher.encrypt_and_digest(K_doc)
+        return nonce + tag + ciphertext
 
     @staticmethod
     def unwrap_key(K_shared: bytes, W_u: bytes) -> bytes:
-        cipher = AES.new(K_shared, AES.MODE_WRAP)
-        K_doc = cipher.decrypt(W_u)
-        return K_doc
+        mode = getattr(AES, 'MODE_KW', None)
+        if mode is not None and len(W_u) % 8 == 0:
+            try:
+                cipher = AES.new(K_shared, mode)
+                if hasattr(cipher, 'unseal'):
+                    return cipher.unseal(W_u)
+                elif hasattr(cipher, 'decrypt'):
+                    return cipher.decrypt(W_u)
+            except Exception:
+                pass
+        
+        # Fallback AES-GCM unwrapping
+        nonce = W_u[:12]
+        tag = W_u[12:28]
+        ciphertext = W_u[28:]
+        cipher = AES.new(K_shared, AES.MODE_GCM, nonce=nonce)
+        return cipher.decrypt_and_verify(ciphertext, tag)

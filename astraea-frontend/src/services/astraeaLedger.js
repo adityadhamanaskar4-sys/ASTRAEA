@@ -1,5 +1,6 @@
 import { createLockboxReference, ciphertextFingerprint, newDocumentId, newSessionId, signReceipt, verifySignature, fingerprint } from './cryptoSim';
 
+const API_BASE_URL = 'http://localhost:8000';
 const STORAGE_KEY = 'astraea_state_v1';
 
 const NODE_NAMES = ['NODE-ALPHA', 'NODE-BRAVO', 'NODE-CHARLIE', 'NODE-DELTA', 'NODE-ECHO'];
@@ -83,6 +84,41 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---- Sender flow ----
 export async function distributeDocument({ title, classification, body, recipientUids, onStatus }) {
+  // Call Backend 1 API
+  try {
+    onStatus?.('Sealing content under AES-256-GCM & generating ML-KEM lockboxes via Backend 1 API…');
+    const res = await fetch(`${API_BASE_URL}/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, classification, body, recipient_uids: recipientUids })
+    });
+
+    if (res.ok) {
+      const apiDoc = await res.json();
+      const state = loadState();
+      const doc = {
+        docId: apiDoc.doc_id,
+        title: apiDoc.title,
+        classification: apiDoc.classification,
+        body: body,
+        ciphertextFp: apiDoc.ciphertext_fp,
+        createdAt: apiDoc.created_at || Date.now(),
+        recipients: apiDoc.recipients.map(r => ({
+          uid: r.uid,
+          name: OFFICERS.find(o => o.uid === r.uid)?.name || r.name || r.uid,
+          lockboxRef: r.lockbox_ref,
+          status: r.status
+        }))
+      };
+      state.documents[doc.docId] = doc;
+      saveState(state);
+      return doc;
+    }
+  } catch (err) {
+    console.warn('Backend 1 API offline, using local client simulation mode:', err.message);
+  }
+
+  // Local fallback
   const state = loadState();
   const docId = newDocumentId();
 
@@ -115,9 +151,6 @@ export async function distributeDocument({ title, classification, body, recipien
 }
 
 // ---- Recipient flow ----
-// Runs the full Decryption Requested → … → Secure Viewer Ready chain.
-// onStep(stageKey, status) is called as each stage changes so the UI can
-// animate a live step log. Returns { ledgerRecord, wId, doc, lockbox }.
 export async function requestDecryption({ docId, officerUid, onStep }) {
   const state = loadState();
   const doc = state.documents[docId];
@@ -127,9 +160,10 @@ export async function requestDecryption({ docId, officerUid, onStep }) {
 
   const officer = OFFICERS.find((o) => o.uid === officerUid);
   const sessionId = newSessionId();
+  const timestamp = String(Math.floor(Date.now() / 1000));
 
   onStep?.('requested', 'active');
-  await wait(500);
+  await wait(400);
   onStep?.('requested', 'complete');
 
   onStep?.('receipt', 'active');
@@ -141,21 +175,89 @@ export async function requestDecryption({ docId, officerUid, onStep }) {
     sessionId,
     requestedAt: Date.now(),
   };
-  await wait(600);
+  await wait(400);
   onStep?.('receipt', 'complete');
 
   onStep?.('signing', 'active');
   const signature = await signReceipt(receipt);
-  await wait(700);
+  await wait(500);
   onStep?.('signing', 'complete');
 
+  // Call Backend 1 API
+  try {
+    onStep?.('submitting', 'active');
+    const res = await fetch(`${API_BASE_URL}/request_decryption`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: officerUid,
+        doc_id: docId,
+        timestamp: timestamp,
+        signature: signature
+      })
+    });
+
+    if (res.ok) {
+      onStep?.('submitting', 'complete');
+      onStep?.('consensus', 'active');
+      await wait(600);
+      onStep?.('consensus', 'complete');
+
+      onStep?.('committed', 'active');
+      const apiRes = await res.json();
+      const wId = apiRes.w_id;
+
+      const ledgerRecord = {
+        ledgerId: apiRes.ledger_record?.ledgerId || `LR-${state.ledger.length + 1}`,
+        docId,
+        officerUid,
+        officerName: officer?.name,
+        sessionId,
+        receipt: apiRes.ledger_record?.receipt || `${officerUid} || ${docId} || ${timestamp}`,
+        signature: apiRes.ledger_record?.signature || signature,
+        wId: wId,
+        consensusNodes: apiRes.ledger_record?.consensusNodes || state.nodes.map((n) => n.name),
+        timestamp: Date.now(),
+        status: 'committed',
+      };
+
+      state.ledger.push(ledgerRecord);
+      state.nodes = state.nodes.map((n) => ({ ...n, height: n.height + 1 }));
+      const idx = doc.recipients.findIndex((r) => r.uid === officerUid);
+      doc.recipients[idx] = { ...lockbox, status: 'decrypted' };
+      saveState(state);
+      await wait(300);
+      onStep?.('committed', 'complete');
+
+      onStep?.('token', 'active');
+      await wait(400);
+      onStep?.('token', 'complete');
+
+      onStep?.('decrypting', 'active');
+      await wait(400);
+      onStep?.('decrypting', 'complete');
+
+      onStep?.('watermarking', 'active');
+      await wait(400);
+      onStep?.('watermarking', 'complete');
+
+      onStep?.('ready', 'active');
+      await wait(200);
+      onStep?.('ready', 'complete');
+
+      return { ledgerRecord, wId, doc, lockbox, watermarkedImageBase64: apiRes.watermarked_image_base64 };
+    }
+  } catch (err) {
+    console.warn('Backend 1 API offline, using local client simulation mode:', err.message);
+  }
+
+  // Local fallback simulation
   onStep?.('submitting', 'active');
   await wait(500);
   onStep?.('submitting', 'complete');
 
   onStep?.('consensus', 'active');
-  // Simulate consensus: each node votes after a short delay.
-  await wait(900);
+  await wait(700);
   onStep?.('consensus', 'complete');
 
   onStep?.('committed', 'active');
@@ -181,33 +283,45 @@ export async function requestDecryption({ docId, officerUid, onStep }) {
   await wait(400);
   onStep?.('committed', 'complete');
 
-  // THE DOCUMENT DOES NOT APPEAR BEFORE LEDGER COMMIT — everything above
-  // this line involves no plaintext; only after the record above is
-  // durably saved do we proceed to token release / decryption / viewer.
-
   onStep?.('token', 'active');
-  await wait(500);
+  await wait(400);
   onStep?.('token', 'complete');
 
   onStep?.('decrypting', 'active');
-  await wait(600);
+  await wait(500);
   onStep?.('decrypting', 'complete');
 
   onStep?.('watermarking', 'active');
-  await wait(500);
+  await wait(400);
   onStep?.('watermarking', 'complete');
 
   onStep?.('ready', 'active');
-  await wait(300);
+  await wait(200);
   onStep?.('ready', 'complete');
 
   return { ledgerRecord, wId, doc, lockbox };
 }
 
 // ---- Investigator flow ----
+export async function auditWidWithBackend(wId) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ w_id: wId })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('Backend audit API offline:', err.message);
+  }
+  return null;
+}
+
 export function findLedgerRecordByWid(wId) {
   const state = loadState();
-  return state.ledger.find((r) => r.wId === wId) || null;
+  return state.ledger.find((r) => r.wId === wId || (r.wId && r.wId.toLowerCase() === wId.toLowerCase())) || null;
 }
 
 export async function verifyLedgerRecord(record) {
@@ -218,6 +332,4 @@ export async function verifyLedgerRecord(record) {
 export function seedDemoData() {
   const state = loadState();
   if (Object.keys(state.documents).length > 0) return;
-  // Leave empty by default; Distribution page seeds on first send so the
-  // dashboard tells an honest "nothing distributed yet" story initially.
 }

@@ -1,0 +1,39 @@
+:root {
+  /* Base surfaces */
+  --bg-deep: #0a0e14;
+  --bg-panel: #12181f;
+  --bg-panel-raised: #171f28;
+  --bg-inset: #0d1218;
+  --hairline: #232d3a;
+  --hairline-strong: #303c4c;
+
+  /* Text */
+  --text-primary: #e8e6df;
+  --text-muted: #8b93a1;
+  --text-faint: #5b6472;
+
+  /* Accents */
+  --gold: #c9a227;
+  --gold-dim: #8a7020;
+  --teal: #3fa7a1;
+  --teal-dim: #2a726d;
+  --green: #4c9a5b;
+  --amber: #c98a27;
+  --red: #b5443a;
+
+  /* Type */
+  --font-ui: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: 3px;
+  --radius-md: 4px;
+
+  --shadow-panel: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

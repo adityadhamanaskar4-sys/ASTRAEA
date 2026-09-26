@@ -1,0 +1,46 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: var(--font-ui);
+}
+
+::selection {
+  background: var(--gold-dim);
+  color: var(--bg-deep);
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--font-data);
+}
+
+.scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+}

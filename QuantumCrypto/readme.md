@@ -1,0 +1,123 @@
+```markdown
+# ASTRAEA: Core Cryptographic & Provenance Engine
+
+This repository contains the cryptographic backend and ledger components for **Project ASTRAEA** (SIH26237). It provides a mathematically rigorous, zero-trust implementation of Post-Quantum Cryptography (PQC), symmetric payload encryption, and immutable steganographic provenance.
+
+## ⚠️ Security Disclaimer & Demonstration Context
+This module is strictly designed for the Smart India Hackathon offline demonstration. 
+- **Endpoint Execution Trade-off:** To preserve the broadcast-encryption bandwidth advantage, the DWT watermark injection is performed locally by the client. In a live Ministry of Defence deployment, this operation must occur within a hardware-backed Trusted Execution Environment (TEE) or Secure Display Enclave to prevent volatile memory dumping.
+- **Analog Extraction Dependency:** The backend expects the ML/CV module to return an extracted byte array from a physical photograph. The backend mathematically heals optical bit-flips via the included Reed-Solomon Forward Error Correction (FEC) engine before executing the ledger audit.
+
+---
+
+## 🛠 Prerequisites & Installation
+
+The ASTRAEA backend requires C-bindings for the NIST Post-Quantum standards. It relies on standard Python 3.10+ and requires specific cryptographic libraries.
+
+### 1. Install Python Dependencies
+Run the following command in your virtual environment or Docker container:
+
+```bash
+pip install liboqs-python pycryptodome blake3 reedsolo
+
+```
+
+### 2. System-Specific Build Requirements
+
+Because `liboqs-python` compiles C-code on its first run to handle the post-quantum algorithms, your system must have the appropriate build tools installed:
+
+* **Windows:** You must install **CMake** and the **Visual Studio C++ Build Tools** (specifically the "Desktop development with C++" workload) before running the scripts.
+* **Linux / Docker (Recommended):** Ensure `build-essential` and `cmake` are installed:
+```bash
+sudo apt-get update
+sudo apt-get install build-essential cmake
+
+```
+
+
+
+---
+
+## 📂 Core Cryptographic Modules
+
+### `kem_engine.py` (Post-Quantum Key Distribution)
+
+Implements NIST FIPS 203 (**ML-KEM-768**).
+
+* Used during broadcast distribution to securely encapsulate the AES-256-GCM Master Key ($K_{doc}$) for each authorized recipient.
+* Enables the system to broadcast one heavy encrypted document to multiple officers by only transmitting lightweight, recipient-specific lockboxes ($W_u$).
+
+### `dsa_engine.py` (Post-Quantum Non-Repudiation)
+
+Implements NIST FIPS 204 (**ML-DSA-65**).
+
+* Used by the client to cryptographically sign the decryption intent receipt ($m_{receipt}$).
+* Guarantees undeniable proof of the specific officer requesting the decryption session.
+
+### `aes_engine.py` (Payload Encryption)
+
+Implements **AES-256-GCM** and **AES-KW**.
+
+* Uses a FIPS-compliant 96-bit (12-byte) nonce to encrypt the raw document payload ($C_{doc}$).
+* Uses AES Key Wrap to secure $K_{doc}$ using the ML-KEM shared secret.
+
+### `ledger_math.py` (Immutable Provenance)
+
+Implements the **Monotonic Feistel Hash-Chain (MFHC)**.
+
+* Strictly bounds the client's ML-DSA signature ($\sigma_u$) into a tamper-evident ledger state ($y_i$) using BLAKE3.
+* Utilizes a discrete monotonic function to prevent algebraic state manipulation by compromised nodes.
+
+### `forensic_id.py` (Ledger-First Watermark Derivation)
+
+Enforces the ASTRAEA "Ledger-First" requirement.
+
+* Derives the 256-bit forensic identifier ($W_{ID}$) by hashing the cryptographically verified signature ($\sigma_u$) with the committed ledger state ($y_i$).
+* $W_{ID} = Truncate_{256}(BLAKE3(\sigma_u \vert{}\vert{} y_i))$
+
+### `fec_engine.py` (Analog-Hole Resilience)
+
+Wraps the 256-bit $W_{ID}$ in **Reed-Solomon Forward Error Correction (FEC)**.
+
+* **Encoding:** Converts the 32-byte $W_{ID}$ into a robust ~50-byte payload for the ML team's DWT injection script.
+* **Decoding (Healing):** Takes the flawed, optically corrupted byte array extracted by OpenCV from a physical smartphone photograph and mathematically reconstructs the perfect $W_{ID}$ required for the ledger audit.
+
+---
+
+## 🧪 Validating the Cryptographic Threat Models
+
+The test suite mathematically proves the resilience of the ASTRAEA architecture against six critical insider-threat and physical-leak scenarios.
+
+To execute the test suite, run:
+
+```bash
+python test_threats.py
+
+```
+
+### Verified Threat Vectors:
+
+1. **End-to-End FEC Recovery:** Proves the system can extract and mathematically heal a corrupted watermark (up to 9 corrupted bytes) from an analog physical photograph.
+2. **Unauthorized Decapsulation:** Proves ML-KEM blocks access if an unauthorized private key attempts to unwrap the AES document key.
+3. **Modified Decryption Receipt:** Proves ML-DSA catches tampered session metadata (e.g., changed UID or Timestamp).
+4. **Forged Signature:** Proves ML-DSA blocks signatures generated by unassociated private keys.
+5. **Ledger State Tampering:** Proves that manipulating the MFHC state completely alters the derived $W_{ID}$, breaking the attribution chain and exposing the tamper attempt.
+6. **AES Tampering:** Proves AES-GCM rejects decryption and prevents rendering if the ciphertext payload is altered in transit.
+
+---
+
+## 🔗 Integration Handoff (Backend $\rightarrow$ ML/CV)
+
+The output of this cryptographic pipeline is a robust byte array generated by `FECStegoEngine().encode_wid_for_dwt()`.
+
+The ML/CV module is responsible for:
+
+1. Injecting this specific byte array into the image using 2D DWT (targeting mid-low frequencies).
+2. Processing physical leak photographs via OpenCV (contour detection, 4-point perspective warp, deskew).
+3. Returning the extracted (and potentially corrupted) byte array back to the backend.
+
+The ML/CV module **does not** perform ledger lookups, error correction, or cryptography. The backend handles the healing of the array and the strict ledger match.
+
+```
+
+```

@@ -3,138 +3,102 @@ import numpy as np
 import pywt
 
 
-COEFFICIENT_OFFSET = 128
-REPETITIONS = 5
+# -------------------------------------------------------------------
+# ASTRAEA DWT Extraction Engine — Level-2 Differential Pair DWT
+#
+# Must mirror embed.py exactly.
+# Extract bits by evaluating differential sign (c1 - c2 > 0).
+# -------------------------------------------------------------------
+
+EMBED_W = 1600
+EMBED_H = 900
+
+ALPHA = 32.0
+REPETITIONS = 7
+COEFFICIENT_OFFSET = 64
 
 
-def bits_to_bytes(bits):
-    """Convert MSB-first bits into bytes."""
-
+def bits_to_bytes(bits: list) -> bytes:
+    """Convert MSB-first bit list to bytes."""
     output = bytearray()
-
-    for i in range(
-        0,
-        len(bits),
-        8
-    ):
-
+    for i in range(0, len(bits), 8):
         chunk = bits[i:i + 8]
-
         if len(chunk) < 8:
             break
-
         value = 0
-
         for bit in chunk:
-            value = (
-                value << 1
-            ) | bit
-
+            value = (value << 1) | bit
         output.append(value)
-
     return bytes(output)
 
 
 def extract_watermark(
-    image,
-    payload_size=50,
-    alpha=20.0
-):
+    image: np.ndarray,
+    payload_size: int = 50,
+    alpha: float = ALPHA
+) -> bytes:
     """
-    Extract payload from HL/LH DWT coefficients.
+    Extract payload from Level-2 DWT HL2/LH2 coefficient pairs.
 
-    Repeated bits are recovered using majority voting.
+    Parameters
+    ----------
+    image        : BGR image (any resolution, auto-resizes to 1600x900)
+    payload_size : number of bytes to recover (default 50)
+    alpha        : threshold parameter
+
+    Returns
+    -------
+    Recovered raw payload bytes
     """
 
-    # BGR -> YCrCb
-    ycrcb = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2YCrCb
-    )
+    if image.shape[1] != EMBED_W or image.shape[0] != EMBED_H:
+        image = cv2.resize(image, (EMBED_W, EMBED_H), interpolation=cv2.INTER_AREA)
 
-    # Luminance
-    y_channel = ycrcb[:, :, 0].astype(
-        np.float32
-    )
+    # BGR → YCrCb → Y
+    ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
+    y = ycrcb[:, :, 0].astype(np.float64)
 
-    # DWT
-    LL, (LH, HL, HH) = pywt.dwt2(
-        y_channel,
-        "haar"
-    )
+    # Level-1 Haar DWT
+    LL1, (LH1, HL1, HH1) = pywt.dwt2(y, "haar")
 
-    # Same coefficient order
-    coefficients = np.concatenate([
-        HL.flatten(),
-        LH.flatten()
-    ])
+    # Level-2 Haar DWT on LL1
+    LL2, (LH2, HL2, HH2) = pywt.dwt2(LL1, "haar")
 
-    total_bits = (
-        payload_size * 8
-    )
+    coeffs = np.concatenate([HL2.flatten(), LH2.flatten()])
 
-    required = (
-        COEFFICIENT_OFFSET
-        + total_bits * REPETITIONS
-    )
-
-    if required > len(coefficients):
-        raise ValueError(
-            "Payload too large for image."
-        )
-
+    total_bits = payload_size * 8
     recovered_bits = []
 
-    for bit_index in range(
-        total_bits
-    ):
-
+    for bit_index in range(total_bits):
         votes = []
+        for rep in range(REPETITIONS):
+            global_rep_idx = bit_index * REPETITIONS + rep
+            idx1 = COEFFICIENT_OFFSET + 2 * global_rep_idx
+            idx2 = COEFFICIENT_OFFSET + 2 * global_rep_idx + 1
 
-        for repetition in range(
-            REPETITIONS
-        ):
+            diff = coeffs[idx1] - coeffs[idx2]
+            votes.append(1 if diff > 0 else 0)
 
-            coefficient_index = (
-                COEFFICIENT_OFFSET
-                + bit_index * REPETITIONS
-                + repetition
-            )
+        # Majority voting across 7 redundancy votes
+        threshold = REPETITIONS // 2 + 1
+        recovered_bits.append(1 if sum(votes) >= threshold else 0)
 
-            coefficient = coefficients[
-                coefficient_index
-            ]
+    return bits_to_bytes(recovered_bits)
 
-            remainder = (
-                coefficient % alpha
-            )
 
-            distance_to_0 = abs(
-                remainder
-                - 0.25 * alpha
-            )
+def extract_from_photo(
+    photo: np.ndarray,
+    payload_size: int = 50,
+    alpha: float = ALPHA
+) -> bytes:
+    """
+    Full physical-photo extraction pipeline.
 
-            distance_to_1 = abs(
-                remainder
-                - 0.75 * alpha
-            )
+    Primary API entry point for backend.
+    """
+    from ml.preprocessing.photo import preprocess_photo
 
-            if distance_to_1 < distance_to_0:
-                votes.append(1)
-            else:
-                votes.append(0)
+    preprocessed = preprocess_photo(photo)
+    extract_img = cv2.resize(preprocessed, (EMBED_W, EMBED_H), interpolation=cv2.INTER_AREA)
 
-        # Majority vote
-        recovered_bit = (
-            1
-            if sum(votes) >= 3
-            else 0
-        )
-
-        recovered_bits.append(
-            recovered_bit
-        )
-
-    return bits_to_bytes(
-        recovered_bits
-    )
+    return extract_watermark(extract_img, payload_size, alpha)

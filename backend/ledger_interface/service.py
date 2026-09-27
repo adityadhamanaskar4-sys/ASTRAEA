@@ -47,16 +47,22 @@ class LedgerService:
             "consensus_achieved": consensus_res.consensus_achieved,
             "quorum_fraction": consensus_res.quorum_fraction,
             "authorization_granted": consensus_res.authorization_granted,
-            "y_current": consensus_res.agreed_hash or primary_res.y_current,
-            "w_id": consensus_res.agreed_wid or primary_res.w_id,
+            "y_current": primary_res.y_current,
+            "w_id": primary_res.w_id,
             "block_id": primary_res.block_id,
             "agreeing_nodes": consensus_res.agreeing_nodes,
             "message": consensus_res.message
         }
 
     def audit_wid(self, extracted_wid: str) -> Dict[str, Any]:
-        """Looks up a 256-bit watermark ID (W_ID*) in the ledger database."""
+        """Looks up a 256-bit watermark ID (W_ID*) across ledger database nodes."""
         audit_res = self.primary_engine.audit_forensic_wid(extracted_wid)
+        if audit_res.attribution_status == "FOUND":
+            return audit_res.model_dump()
+        for engine in self.consensus_cluster.engines:
+            cluster_audit = engine.audit_forensic_wid(extracted_wid)
+            if cluster_audit.attribution_status == "FOUND":
+                return cluster_audit.model_dump()
         return audit_res.model_dump()
 
     def get_ledger_status(self) -> Dict[str, Any]:

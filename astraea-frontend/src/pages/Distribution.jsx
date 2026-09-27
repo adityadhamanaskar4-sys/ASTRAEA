@@ -6,12 +6,12 @@ import StatusChip from '../components/StatusChip';
 import { useAstraea } from '../context/AstraeaContext';
 
 export default function Distribution() {
-  const officers = getOfficers();
+  const { officers: ctxOfficers, bumpRefresh } = useAstraea();
+  const officers = ctxOfficers && ctxOfficers.length > 0 ? ctxOfficers : getOfficers();
   const sampleDocs = getSampleDocuments();
-  const { bumpRefresh } = useAstraea();
 
   const [docIndex, setDocIndex] = useState(0);
-  const [selectedUids, setSelectedUids] = useState([officers[0].uid]);
+  const [selectedUids, setSelectedUids] = useState(() => [officers[0]?.uid || 'OFC-2291']);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);

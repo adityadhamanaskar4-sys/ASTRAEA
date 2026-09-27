@@ -156,3 +156,26 @@ def test_audit_flow():
     audit_unknown = client.post("/audit", json={"w_id": unknown_wid})
     assert audit_unknown.status_code == 200
     assert audit_unknown.json()["attribution_status"] == "NOT_FOUND"
+
+
+def test_list_users_and_token_signing():
+    """Test GET /users and POST /users/{uid}/sign from SQLite database."""
+    res = client.get("/users")
+    assert res.status_code == 200
+    users = res.json()
+    assert len(users) >= 5
+    uids = [u["uid"] for u in users]
+    assert "OFC-2291" in uids
+    assert "OFC-1187" in uids
+    assert "OFC-3305" in uids
+
+    # Test token signing
+    sign_res = client.post("/users/OFC-2291/sign", json={
+        "receipt": "OFC-2291 || DOC-TEST || 12345678"
+    })
+    assert sign_res.status_code == 200
+    sign_data = sign_res.json()
+    assert sign_data["uid"] == "OFC-2291"
+    assert len(sign_data["signature"]) > 0
+    assert len(sign_data["recipient_pk"]) > 0
+

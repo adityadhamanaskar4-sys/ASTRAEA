@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import PipelineStepper from '../components/PipelineStepper';
 import DataField from '../components/DataField';
 import { listDocuments, listLedger, getNodes } from '../services/astraeaLedger';
+import { useAstraea } from '../context/AstraeaContext';
 
 const STORY = [
   { to: '/distribution', label: 'Distribution', desc: 'A document is sealed and sent to recipient lockboxes.' },
@@ -12,6 +13,7 @@ const STORY = [
 ];
 
 export default function Dashboard() {
+  const { refreshTick } = useAstraea();
   const docs = listDocuments();
   const ledger = listLedger();
   const nodes = getNodes();

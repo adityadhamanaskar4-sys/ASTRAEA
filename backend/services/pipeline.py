@@ -11,6 +11,7 @@ from backend.crypto_interface import CryptoWrapper
 from backend.ledger_interface import LedgerService
 from backend.watermark_interface import WatermarkIDService, DWTWatermarkEngine
 from backend.services.state_machine import PipelineStateMachine
+from backend.database.sqlite_store import SQLiteStore
 from backend.models.state import PipelineStage, AuditStatus
 from backend.models.requests import BroadcastRequest, DecryptionRequest, AuditRequest
 from backend.models.responses import (
@@ -29,31 +30,64 @@ class ASTRAEAPipelineService:
     Master Pipeline Service for Project ASTRAEA Backend 1.
     Connects:
     Frontend <-> API <-> Cryptography <-> DLT (Backend 2) <-> Watermarking <-> Forensic Audit.
+    All data is persisted in SQLite databases running in offline airgapped mode.
     """
 
     def __init__(self, db_path: str = "astraea_ledger.db"):
+        self.db_path = db_path
         self.ledger_service = LedgerService(db_path=db_path)
         self.watermark_engine = DWTWatermarkEngine()
         self.wid_service = WatermarkIDService()
+        self.sqlite_store = SQLiteStore(db_path=db_path)
+        self.sqlite_store.seed_sample_users(CryptoWrapper)
         
-        # In-memory document storage (strictly no unencrypted disk writes)
-        # doc_id -> Dict record
+        # In-memory document cache initialized from SQLite
         self._documents: Dict[str, Dict[str, Any]] = {}
+        for doc in self.sqlite_store.get_all_documents():
+            self._documents[doc["doc_id"]] = doc
+            
         # Recipient keypair cache for simulation (uid -> {pk_kem, sk_kem, pk_dsa, sk_dsa})
         self._recipient_keys: Dict[str, Dict[str, bytes]] = {}
 
     def _get_or_create_recipient_keys(self, uid: str) -> Dict[str, bytes]:
-        """Retrieves or generates cached ML-KEM and ML-DSA keys for recipient officer."""
-        if uid not in self._recipient_keys:
-            pk_kem, sk_kem = CryptoWrapper.generate_kem_keypair()
-            pk_dsa, sk_dsa = CryptoWrapper.generate_dsa_keypair()
-            self._recipient_keys[uid] = {
-                "pk_kem": pk_kem,
-                "sk_kem": sk_kem,
-                "pk_dsa": pk_dsa,
-                "sk_dsa": sk_dsa
-            }
+        """Retrieves or generates cached ML-KEM and ML-DSA keys for recipient officer from SQLite."""
+        if uid in self._recipient_keys:
+            return self._recipient_keys[uid]
+
+        keys = self.sqlite_store.get_user_keys(uid)
+        if keys:
+            self._recipient_keys[uid] = keys
+            return keys
+
+        pk_kem, sk_kem = CryptoWrapper.generate_kem_keypair()
+        pk_dsa, sk_dsa = CryptoWrapper.generate_dsa_keypair()
+        keys = {
+            "pk_kem": pk_kem,
+            "sk_kem": sk_kem,
+            "pk_dsa": pk_dsa,
+            "sk_dsa": sk_dsa
+        }
+        self.sqlite_store.save_user_keys(
+            uid=uid,
+            name=f"Officer {uid}",
+            role="Recipient",
+            clearance_level="RESTRICTED",
+            keys=keys
+        )
+        self._recipient_keys[uid] = keys
         return self._recipient_keys[uid]
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """Returns all registered users from SQLite."""
+        return self.sqlite_store.get_all_users()
+
+    def get_user(self, uid: str) -> Optional[Dict[str, Any]]:
+        """Returns specific user profile from SQLite."""
+        return self.sqlite_store.get_user(uid)
+
+    def get_user_keys(self, uid: str) -> Optional[Dict[str, bytes]]:
+        """Returns recipient cryptographic keys."""
+        return self._get_or_create_recipient_keys(uid)
 
     # =========================================================================
     # PHASE 1: DOCUMENT BROADCAST & ENCRYPTION
@@ -103,8 +137,8 @@ class ASTRAEAPipelineService:
         ciphertext_fp = f"0x{hashlib.sha256(encrypted_payload).hexdigest()[:16].upper()}"
         created_at = time.time() * 1000
 
-        # Store in-memory
-        self._documents[doc_id] = {
+        # Store in-memory and persist encrypted document record in SQLite
+        doc_entry = {
             "doc_id": doc_id,
             "title": req.title,
             "classification": req.classification,
@@ -116,8 +150,10 @@ class ASTRAEAPipelineService:
             "lockboxes": lockboxes_data,
             "recipients": recipients_list
         }
+        self._documents[doc_id] = doc_entry
+        self.sqlite_store.save_document(doc_entry)
 
-        logger.info(f"Broadcast created document {doc_id} with {len(req.recipient_uids)} recipient lockboxes.")
+        logger.info(f"Broadcast created document {doc_id} with {len(req.recipient_uids)} recipient lockboxes (persisted to SQLite).")
 
         return BroadcastResponse(
             doc_id=doc_id,
@@ -229,11 +265,12 @@ class ASTRAEAPipelineService:
         # Stage 6: DELIVERED
         sm.transition_to(PipelineStage.DELIVERED, "Secure viewer package assembled and ready for delivery.")
 
-        # Update lockbox state in memory
+        # Update lockbox state in memory and SQLite
         lockbox["status"] = "decrypted"
         for r in doc_entry["recipients"]:
             if r.uid == req.uid:
                 r.status = "decrypted"
+        self.sqlite_store.update_lockbox_status(req.doc_id, req.uid, "decrypted")
 
         ledger_record = {
             "ledgerId": f"LR-{commit_res['block_id']}",

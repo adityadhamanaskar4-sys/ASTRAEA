@@ -48,13 +48,22 @@ def seed_sample_data(service: ASTRAEAPipelineService):
     except Exception as ex:
         logger.warning(f"Demo seeding skipped: {ex}")
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(f"Starting {config.app_name} on {config.host}:{config.port}")
+    seed_sample_data(pipeline_service)
+    yield
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=config.app_name,
         description="Project ASTRAEA Backend 1 — API & Data Flow System connecting Frontend, Cryptography, DLT, Watermarking & Forensic Audit.",
         version="1.0.0",
         docs_url="/docs",
-        redoc_url="/redoc"
+        redoc_url="/redoc",
+        lifespan=lifespan
     )
 
     # Enable CORS for Frontend (Vite / React / local web UI)
@@ -68,11 +77,6 @@ def create_app() -> FastAPI:
 
     # Include all API routes
     app.include_router(api_router)
-
-    @app.on_event("startup")
-    async def startup_event():
-        logger.info(f"Starting {config.app_name} on {config.host}:{config.port}")
-        seed_sample_data(pipeline_service)
 
     return app
 

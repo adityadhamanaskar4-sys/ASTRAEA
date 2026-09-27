@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import DropZone from '../components/DropZone';
 import StepLog from '../components/StepLog';
 import { extractWatermark } from '../services/watermark';
-import { findLedgerRecordByWid, verifyLedgerRecord } from '../services/astraeaLedger';
+import { findLedgerRecordByWid, verifyLedgerRecord, auditWidWithBackend, getOfficers } from '../services/astraeaLedger';
 import { useAstraea } from '../context/AstraeaContext';
 
 const STEPS = [
@@ -77,7 +77,41 @@ export default function InvestigatorPortal() {
 
     setStep('query', 'active');
     await wait(500);
-    const record = findLedgerRecordByWid(wId);
+
+    let record = null;
+    let valid = false;
+
+    // 1. Query DLT Ledger in Backend SQLite
+    try {
+      const backendAudit = await auditWidWithBackend(wId);
+      if (backendAudit && backendAudit.attribution_status === 'FOUND') {
+        const officersList = getOfficers();
+        const officerUid = backendAudit.parsed_receipt?.uid;
+        const officer = officersList.find((o) => o.uid === officerUid);
+
+        record = {
+          ledgerId: `LR-${backendAudit.block_id || 1}`,
+          docId: backendAudit.parsed_receipt?.doc_id || 'DOC-CLASSIFIED',
+          officerUid: officerUid,
+          officerName: officer?.name || officerUid,
+          sessionId: 'SES-DLT-AUDIT',
+          receipt: backendAudit.client_receipt,
+          signature: backendAudit.client_signature,
+          wId: backendAudit.extracted_wid,
+          y_current: backendAudit.y_current,
+          timestamp: backendAudit.parsed_receipt?.timestamp ? Number(backendAudit.parsed_receipt.timestamp) * 1000 : Date.now(),
+          status: 'committed'
+        };
+        valid = backendAudit.signature_verified;
+      }
+    } catch (auditErr) {
+      console.warn('Backend forensic audit call failed, using local ledger records:', auditErr);
+    }
+
+    // 2. Fall back to local ledger search if offline
+    if (!record) {
+      record = findLedgerRecordByWid(wId);
+    }
     setStep('query', 'complete');
 
     if (!record) {
@@ -92,7 +126,9 @@ export default function InvestigatorPortal() {
     setStep('receipt', 'complete');
 
     setStep('verify', 'active');
-    const valid = await verifyLedgerRecord(record);
+    if (!valid) {
+      valid = await verifyLedgerRecord(record);
+    }
     await wait(600);
     setStep('verify', valid ? 'complete' : 'error');
 

@@ -1,5 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class BackendConfig(BaseSettings):
     app_name: str = "ASTRAEA API & Data Flow Backend"
@@ -16,8 +16,6 @@ class BackendConfig(BaseSettings):
     # Storage settings (in-memory by default, ephemeral cache)
     in_memory_only: bool = True
     
-    class Config:
-        env_prefix = "ASTRAEA_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_prefix="ASTRAEA_", case_sensitive=False)
 
 config = BackendConfig()

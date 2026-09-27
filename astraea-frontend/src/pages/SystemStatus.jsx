@@ -1,8 +1,10 @@
 import { getNodes, listLedger, listDocuments } from '../services/astraeaLedger';
+import { useAstraea } from '../context/AstraeaContext';
 import StatusChip from '../components/StatusChip';
 import DataField from '../components/DataField';
 
 export default function SystemStatus() {
+  const { refreshTick } = useAstraea();
   const nodes = getNodes();
   const ledger = listLedger();
   const docs = listDocuments();

@@ -81,3 +81,18 @@ def test_incomplete_and_noisy_wid_audit_ranking():
     assert len(data_unknown["candidates"]) >= 2
     # Candidates are still listed and ranked
     assert data_unknown["candidates"][0]["similarity_percentage"] < 80.0
+
+    # --- Scenario 5: Scoped search with doc_id matching target document ---
+    res_scoped = client.post("/audit", json={"w_id": wid_2291, "doc_id": doc_id})
+    data_scoped = res_scoped.json()
+    assert data_scoped["attribution_status"] == "FOUND"
+    assert data_scoped["parsed_receipt"]["uid"] == "OFC-2291"
+    # All candidates must belong to the specified doc_id
+    assert len(data_scoped["candidates"]) >= 1
+    assert all(c["doc_id"] == doc_id for c in data_scoped["candidates"])
+
+    # --- Scenario 6: Scoped search with non-matching doc_id (reduces window to 0 blocks) ---
+    res_mismatch = client.post("/audit", json={"w_id": wid_2291, "doc_id": "DOC-DIFFERENT-UNCOMMITTED"})
+    data_mismatch = res_mismatch.json()
+    assert data_mismatch["attribution_status"] == "NOT_FOUND"
+    assert len(data_mismatch["candidates"]) == 0

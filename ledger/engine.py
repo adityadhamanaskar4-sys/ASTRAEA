@@ -414,13 +414,15 @@ class LedgerEngine:
             weighted_score = (bit_acc * 0.7) + (coverage * 100.0 * 0.3)
             return round(weighted_score, 1), matching_bits, min_len, f"PARTIAL_BIT_SIMILARITY ({matching_bits}/{min_len} bits)"
 
-    def audit_forensic_wid(self, extracted_wid: str) -> ForensicAuditResponse:
+    def audit_forensic_wid(self, extracted_wid: str, doc_id: Optional[str] = None) -> ForensicAuditResponse:
         """
         Traverses the ledger to resolve a physical leak by its recovered 256-bit watermark ID (W_ID*).
         Supports full 256-bit W_ID, partial prefixes/substrings, and noisy/corrupted marks.
+        Optionally scopes/reduces search window to blocks associated with doc_id.
         Ranks and lists all similar candidate officers.
         """
         clean_wid = extracted_wid.strip().lower()
+        clean_doc_id = doc_id.strip() if doc_id else None
         if not clean_wid:
             return ForensicAuditResponse(
                 attribution_status="NOT_FOUND",
@@ -433,6 +435,12 @@ class LedgerEngine:
         candidates = []
 
         for block in audit_blocks:
+            parsed = self._parse_receipt(block["client_receipt"])
+
+            # If doc_id filter is provided, skip blocks for other documents
+            if clean_doc_id and parsed.get("doc_id") != clean_doc_id:
+                continue
+
             try:
                 sig_bytes = bytes.fromhex(block["client_signature"])
             except ValueError:
@@ -442,7 +450,6 @@ class LedgerEngine:
             computed_wid = ForensicIDEngine.derive_forensic_id(sig_bytes, y_i_hex).lower()
 
             sim_pct, matching_bits, total_bits, match_type = self._compute_wid_similarity(clean_wid, computed_wid)
-            parsed = self._parse_receipt(block["client_receipt"])
 
             is_sig_valid = self._verify_client_signature(
                 block["client_receipt"],
@@ -471,10 +478,11 @@ class LedgerEngine:
         candidates.sort(key=lambda c: (c["similarity_percentage"], c["block_id"]), reverse=True)
 
         if not candidates:
+            msg = f"No committed access blocks found for Document {clean_doc_id} in ledger." if clean_doc_id else "Ledger contains no committed access blocks."
             return ForensicAuditResponse(
                 attribution_status="NOT_FOUND",
                 extracted_wid=extracted_wid,
-                message="Ledger contains no committed access blocks.",
+                message=msg,
                 candidates=[]
             )
 

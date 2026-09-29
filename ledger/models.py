@@ -51,6 +51,7 @@ class ChainIntegrityReport(BaseModel):
 class ForensicAuditRequest(BaseModel):
     """Request payload to query the ledger using an extracted watermark ID."""
     extracted_wid: str = Field(..., min_length=1, description="Hex watermark or fragment recovered from leak")
+    doc_id: Optional[str] = Field(None, description="Optional document ID to narrow search window")
 
 class ForensicAuditResponse(BaseModel):
     """Cryptographic attribution response for a forensic leak investigation."""

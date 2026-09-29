@@ -32,17 +32,18 @@ async def audit_forensic_id(
 @router.post("/audit/upload", response_model=AuditResponse)
 async def audit_uploaded_image(
     file: UploadFile = File(...),
+    doc_id: Optional[str] = Form(None),
     pipeline: ASTRAEAPipelineService = Depends(get_pipeline_service)
 ):
     """
     POST /audit/upload (Form File upload)
-    Input: Leaked image file (PNG/JPEG/BMP).
-    Process: Extracts W_ID* using OpenCV deskew + DWT extraction, performs DLT lookup & verification.
+    Input: Leaked image file (PNG/JPEG/BMP), optional doc_id form field.
+    Process: Extracts W_ID* using OpenCV deskew + DWT extraction, performs DLT lookup & verification scoped to doc_id if provided.
     """
     try:
         content = await file.read()
         b64_str = base64.b64encode(content).decode("utf-8")
-        req = AuditRequest(image_base64=b64_str)
+        req = AuditRequest(image_base64=b64_str, doc_id=doc_id)
         return pipeline.process_audit_request(req)
     except Exception as ex:
         raise HTTPException(status_code=400, detail=f"Image upload audit failed: {str(ex)}")

@@ -318,7 +318,9 @@ class ASTRAEAPipelineService:
             if img_np is not None:
                 extracted_wid = self.watermark_engine.extract_wid_from_image(img_np)
                 if not extracted_wid and self._documents:
-                    for doc in self._documents.values():
+                    # If doc_id was specified by investigator, prioritize/restrict to that document's reference canvas
+                    docs_to_check = [self._documents[req.doc_id]] if (req.doc_id and req.doc_id in self._documents) else self._documents.values()
+                    for doc in docs_to_check:
                         try:
                             ref_canvas = self._create_reference_canvas(
                                 doc["title"],
@@ -346,8 +348,8 @@ class ASTRAEAPipelineService:
                 message="No watermark ID or image provided for audit."
             )
 
-        # Query DLT Ledger
-        audit_raw = self.ledger_service.audit_wid(extracted_wid)
+        # Query DLT Ledger (optionally scoped to req.doc_id to reduce search window)
+        audit_raw = self.ledger_service.audit_wid(extracted_wid, doc_id=req.doc_id)
 
         status_str = audit_raw.get("attribution_status", "NOT_FOUND")
         status_enum = AuditStatus[status_str] if status_str in AuditStatus.__members__ else AuditStatus.NOT_FOUND

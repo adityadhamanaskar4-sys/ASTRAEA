@@ -8,7 +8,8 @@ import {
   verifyLedgerRecord,
   auditWidWithBackend,
   auditUploadedImageWithBackend,
-  getOfficers
+  getOfficers,
+  listDocuments
 } from '../services/astraeaLedger';
 import { useAstraea } from '../context/AstraeaContext';
 
@@ -48,6 +49,9 @@ export default function InvestigatorPortal() {
   const [statuses, setStatuses] = useState({});
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState(null); // { level: 'none' | 'extracted-only' | 'attributed', ... }
+  const [docIdFilter, setDocIdFilter] = useState('');
+
+  const availableDocs = listDocuments();
 
   const setStep = (key, status) => setStatuses((prev) => ({ ...prev, [key]: status }));
 
@@ -55,6 +59,8 @@ export default function InvestigatorPortal() {
     setRunning(true);
     setOutcome(null);
     setStatuses({});
+
+    const effectiveDocId = docIdFilter.trim() || null;
 
     setStep('received', 'active');
     await wait(350);
@@ -69,9 +75,9 @@ export default function InvestigatorPortal() {
     let backendAudit = null;
     let wId = null;
 
-    // 1. Primary: Send leaked photograph to Backend DWT + OpenCV forensics engine
+    // 1. Primary: Send leaked photograph to Backend DWT + OpenCV forensics engine (scoped by doc_id if provided)
     try {
-      backendAudit = await auditUploadedImageWithBackend(file);
+      backendAudit = await auditUploadedImageWithBackend(file, effectiveDocId);
       if (backendAudit && backendAudit.extracted_wid) {
         wId = backendAudit.extracted_wid;
       }
@@ -93,7 +99,7 @@ export default function InvestigatorPortal() {
 
     if (!wId) {
       setStep('extraction', 'error');
-      setOutcome({ level: 'none' });
+      setOutcome({ level: 'none', searchedDocId: effectiveDocId });
       setRunning(false);
       return;
     }
@@ -137,7 +143,7 @@ export default function InvestigatorPortal() {
     // If backend did not find in ledger yet, try querying with extracted wId directly
     if (!record && wId) {
       try {
-        const auditRes = await auditWidWithBackend(wId);
+        const auditRes = await auditWidWithBackend(wId, effectiveDocId);
         if (auditRes && (auditRes.attribution_status === 'FOUND' || auditRes.attribution_status === 'PARTIAL_MATCH' || auditRes.attribution_status === 'FOUND_BUT_INVALID')) {
           const officersList = getOfficers();
           const officerUid = auditRes.parsed_receipt?.uid;
@@ -146,7 +152,7 @@ export default function InvestigatorPortal() {
 
           record = {
             ledgerId: `LR-${auditRes.block_id || 1}`,
-            docId: auditRes.parsed_receipt?.doc_id || 'DOC-CLASSIFIED',
+            docId: auditRes.parsed_receipt?.doc_id || effectiveDocId || 'DOC-CLASSIFIED',
             officerUid: officerUid,
             officerName: officer?.name || (officerUid ? `Officer ${officerUid}` : 'Unknown Officer'),
             sessionId: 'SES-DLT-AUDIT',
@@ -168,13 +174,13 @@ export default function InvestigatorPortal() {
 
     // Final fallback to local localStorage ledger
     if (!record) {
-      record = findLedgerRecordByWid(wId);
+      record = findLedgerRecordByWid(wId, effectiveDocId);
     }
     setStep('query', 'complete');
 
     if (!record) {
       setStep('receipt', 'error');
-      setOutcome({ level: 'extracted-only', wId, candidates });
+      setOutcome({ level: 'extracted-only', wId, candidates, searchedDocId: effectiveDocId });
       setRunning(false);
       return;
     }
@@ -191,7 +197,7 @@ export default function InvestigatorPortal() {
     setStep('verify', valid ? 'complete' : 'error');
 
     if (!valid) {
-      setOutcome({ level: 'extracted-only', wId, record, candidates });
+      setOutcome({ level: 'extracted-only', wId, record, candidates, searchedDocId: effectiveDocId });
       setRunning(false);
       return;
     }
@@ -201,13 +207,14 @@ export default function InvestigatorPortal() {
     setStep('attribution', 'complete');
 
     const isPartial = backendAudit?.attribution_status === 'PARTIAL_MATCH';
-    const investigation = { wId, record, candidates, verified: true, isPartial };
+    const investigation = { wId, record, candidates, verified: true, isPartial, searchedDocId: effectiveDocId };
     setInvestigation(investigation);
     setOutcome({
       level: isPartial ? 'partial' : 'attributed',
       wId,
       record,
-      candidates
+      candidates,
+      searchedDocId: effectiveDocId
     });
     setRunning(false);
   };
@@ -225,7 +232,58 @@ export default function InvestigatorPortal() {
       </div>
 
       <div className="panel">
-        <div className="panel-title">Upload suspected leak</div>
+        <div className="panel-title">1. Search Window Scope (Optional)</div>
+        <p className="small muted" style={{ marginBottom: 12 }}>
+          Optionally specify a Document ID to narrow the ledger search window and prioritize homography alignment for that specific document.
+        </p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ flex: '1 1 240px' }}>
+            <input
+              type="text"
+              className="input mono"
+              placeholder="e.g. DOC-E0544A41 (or leave blank for all)"
+              value={docIdFilter}
+              onChange={(e) => setDocIdFilter(e.target.value)}
+              style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+            />
+          </div>
+          {availableDocs && availableDocs.length > 0 && (
+            <div style={{ flex: '1 1 280px' }}>
+              <select
+                className="input"
+                value={docIdFilter}
+                onChange={(e) => setDocIdFilter(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', fontSize: '13px' }}
+              >
+                <option value="">-- All Documents (Global Search) --</option>
+                {availableDocs.map((d) => (
+                  <option key={d.docId} value={d.docId}>
+                    {d.docId} — {d.title} ({d.classification})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {docIdFilter && (
+            <button
+              type="button"
+              className="btn btn-secondary small"
+              onClick={() => setDocIdFilter('')}
+              style={{ padding: '6px 12px', fontSize: '12px' }}
+            >
+              Clear Filter
+            </button>
+          )}
+        </div>
+        <div className="small mono" style={{ color: docIdFilter ? 'var(--teal)' : 'var(--muted)' }}>
+          {docIdFilter
+            ? `• Scoped Window: Searching only ledger blocks associated with ${docIdFilter}`
+            : '• Full Ledger Window: Traversing all historical document blocks (Global)'}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-title">2. Upload suspected leak</div>
         <DropZone onFile={runPipeline} />
       </div>
 
@@ -243,9 +301,15 @@ export default function InvestigatorPortal() {
 
           {outcome?.level === 'extracted-only' && (
             <p className="small" style={{ color: 'var(--amber)', marginTop: 12 }}>
-              A mark was extracted, but it does not resolve to a valid, committed ledger record.
+              A mark was extracted, but it does not resolve to a valid, committed ledger record
+              {outcome.searchedDocId ? ` for Document ${outcome.searchedDocId}` : ''}.
               <strong> Extraction alone is not attribution</strong> — this leak cannot be pinned on
               anyone from this evidence.
+              {outcome.searchedDocId && (
+                <span style={{ display: 'block', marginTop: 6, color: 'var(--text-muted)' }}>
+                  Tip: If the document ID was uncertain, clear the filter to search across all documents globally.
+                </span>
+              )}
             </p>
           )}
 

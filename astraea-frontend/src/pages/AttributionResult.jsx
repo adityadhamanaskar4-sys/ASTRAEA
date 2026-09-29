@@ -63,6 +63,9 @@ export default function AttributionResult() {
           {record.similarityPercentage ? `${record.similarityPercentage}% Similarity` : 'Watermark extracted'}
         </StatusChip>
         <StatusChip variant="verified">Cryptographically attributed</StatusChip>
+        {investigation.searchedDocId && (
+          <StatusChip variant="info">Scoped: {investigation.searchedDocId}</StatusChip>
+        )}
       </div>
 
       <div className="panel panel-accent">

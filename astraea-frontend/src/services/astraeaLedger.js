@@ -414,12 +414,14 @@ export async function requestDecryption({ docId, officerUid, onStep }) {
 }
 
 // ---- Investigator flow ----
-export async function auditWidWithBackend(wId) {
+export async function auditWidWithBackend(wId, docId = null) {
   try {
+    const payload = { w_id: wId };
+    if (docId) payload.doc_id = docId;
     const res = await fetch(`${API_BASE_URL}/audit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ w_id: wId })
+      body: JSON.stringify(payload)
     });
     if (res.ok) {
       return await res.json();
@@ -430,18 +432,23 @@ export async function auditWidWithBackend(wId) {
   return null;
 }
 
-export async function auditUploadedImageWithBackend(fileOrBase64) {
+export async function auditUploadedImageWithBackend(fileOrBase64, docId = null) {
   try {
     if (typeof fileOrBase64 === 'string') {
+      const payload = { image_base64: fileOrBase64 };
+      if (docId) payload.doc_id = docId;
       const res = await fetch(`${API_BASE_URL}/audit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_base64: fileOrBase64 })
+        body: JSON.stringify(payload)
       });
       if (res.ok) return await res.json();
     } else if (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob) {
       const formData = new FormData();
       formData.append('file', fileOrBase64);
+      if (docId) {
+        formData.append('doc_id', docId);
+      }
       const res = await fetch(`${API_BASE_URL}/audit/upload`, {
         method: 'POST',
         body: formData
@@ -454,9 +461,12 @@ export async function auditUploadedImageWithBackend(fileOrBase64) {
   return null;
 }
 
-export function findLedgerRecordByWid(wId) {
+export function findLedgerRecordByWid(wId, docId = null) {
   const state = loadState();
-  return state.ledger.find((r) => r.wId === wId || (r.wId && r.wId.toLowerCase() === wId.toLowerCase())) || null;
+  return state.ledger.find((r) => {
+    if (docId && r.docId !== docId) return false;
+    return r.wId === wId || (r.wId && r.wId.toLowerCase() === wId.toLowerCase());
+  }) || null;
 }
 
 export async function verifyLedgerRecord(record) {

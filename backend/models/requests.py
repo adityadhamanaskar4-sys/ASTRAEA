@@ -17,3 +17,4 @@ class DecryptionRequest(BaseModel):
 class AuditRequest(BaseModel):
     w_id: Optional[str] = Field(None, description="256-bit hex Watermark ID (W_ID*)")
     image_base64: Optional[str] = Field(None, description="Base64 encoded leaked image string")
+    doc_id: Optional[str] = Field(None, description="Optional document ID to reduce/scope search window across ledger records")

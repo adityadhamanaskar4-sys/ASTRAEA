@@ -81,4 +81,16 @@ assert audit_data["extracted_wid"] == wid
 assert audit_data["parsed_receipt"]["uid"] == "OFC-2291"
 assert audit_data["parsed_receipt"]["doc_id"] == doc_id
 assert audit_data["signature_verified"] is True
-print("\n>>> FULL FORENSIC LEAK ATTRIBUTION VERIFIED 100% SUCCESSFUL! <<<")
+
+# Test STEP 4B: /audit/upload with optional doc_id provided to reduce search window
+audit_scoped = client.post(
+    "/audit/upload",
+    files={"file": ("leaked_screen_photo.jpg", io.BytesIO(jpg_bytes), "image/jpeg")},
+    data={"doc_id": doc_id}
+)
+assert audit_scoped.status_code == 200
+assert audit_scoped.json()["attribution_status"] == "FOUND"
+assert audit_scoped.json()["parsed_receipt"]["doc_id"] == doc_id
+assert all(c["doc_id"] == doc_id for c in audit_scoped.json()["candidates"])
+
+print("\n>>> FULL FORENSIC LEAK ATTRIBUTION VERIFIED 100% SUCCESSFUL (GLOBAL & SCOPED)! <<<")

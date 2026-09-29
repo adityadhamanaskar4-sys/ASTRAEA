@@ -54,13 +54,13 @@ class LedgerService:
             "message": consensus_res.message
         }
 
-    def audit_wid(self, extracted_wid: str) -> Dict[str, Any]:
-        """Looks up a 256-bit watermark ID (W_ID*) across ledger database nodes."""
-        audit_res = self.primary_engine.audit_forensic_wid(extracted_wid)
+    def audit_wid(self, extracted_wid: str, doc_id: Optional[str] = None) -> Dict[str, Any]:
+        """Looks up a 256-bit watermark ID (W_ID*) across ledger database nodes, optionally scoped by doc_id."""
+        audit_res = self.primary_engine.audit_forensic_wid(extracted_wid, doc_id=doc_id)
         if audit_res.attribution_status == "FOUND":
             return audit_res.model_dump()
         for engine in self.consensus_cluster.engines:
-            cluster_audit = engine.audit_forensic_wid(extracted_wid)
+            cluster_audit = engine.audit_forensic_wid(extracted_wid, doc_id=doc_id)
             if cluster_audit.attribution_status == "FOUND":
                 return cluster_audit.model_dump()
         return audit_res.model_dump()

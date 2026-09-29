@@ -317,6 +317,21 @@ class ASTRAEAPipelineService:
 
             if img_np is not None:
                 extracted_wid = self.watermark_engine.extract_wid_from_image(img_np)
+                if not extracted_wid and self._documents:
+                    for doc in self._documents.values():
+                        try:
+                            ref_canvas = self._create_reference_canvas(
+                                doc["title"],
+                                doc["classification"],
+                                doc.get("plaintext_body", "")
+                            )
+                            extracted_wid = self.watermark_engine.extract_wid_from_image(
+                                img_np, reference_np=ref_canvas
+                            )
+                            if extracted_wid:
+                                break
+                        except Exception:
+                            continue
             else:
                 return AuditResponse(
                     attribution_status=AuditStatus.NOT_FOUND,
@@ -350,6 +365,32 @@ class ASTRAEAPipelineService:
             signature_verified=sig_verified,
             message=audit_raw.get("message", "Audit query complete.")
         )
+
+    def _create_reference_canvas(self, title: str, classification: str, text_content: str) -> np.ndarray:
+        """Renders an unwatermarked reference canvas for guided sub-pixel homography alignment."""
+        from PIL import Image, ImageDraw
+        from ml.embed import EMBED_W, EMBED_H
+        img = Image.new("RGB", (EMBED_W, EMBED_H), color=(248, 249, 250))
+        draw = ImageDraw.Draw(img)
+        header_color = (
+            (185, 28, 28) if classification == "RESTRICTED"
+            else ((217, 119, 6) if classification == "CONFIDENTIAL"
+            else (30, 41, 59))
+        )
+        draw.rectangle([0, 0, EMBED_W, 80], fill=header_color)
+        draw.text(
+            (40, 26),
+            f"[{classification}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM",
+            fill=(255, 255, 255)
+        )
+        draw.text((50, 115), f"DOCUMENT: {title}", fill=(20, 20, 20))
+        draw.line([(50, 155), (EMBED_W - 50, 155)], fill=(200, 200, 200), width=2)
+        lines = text_content.split("\n")
+        y_offset = 185
+        for line in lines:
+            draw.text((50, y_offset), line, fill=(35, 35, 35))
+            y_offset += 32
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
     def list_documents(self) -> List[DocumentMetadataResponse]:
         """Lists all distributed document metadata."""

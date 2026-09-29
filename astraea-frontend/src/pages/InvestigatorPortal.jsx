@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import DropZone from '../components/DropZone';
 import StepLog from '../components/StepLog';
 import { extractWatermark } from '../services/watermark';
-import { findLedgerRecordByWid, verifyLedgerRecord, auditWidWithBackend, getOfficers } from '../services/astraeaLedger';
+import {
+  findLedgerRecordByWid,
+  verifyLedgerRecord,
+  auditWidWithBackend,
+  auditUploadedImageWithBackend,
+  getOfficers
+} from '../services/astraeaLedger';
 import { useAstraea } from '../context/AstraeaContext';
 
 const STEPS = [
@@ -51,17 +57,39 @@ export default function InvestigatorPortal() {
     setStatuses({});
 
     setStep('received', 'active');
-    await wait(400);
+    await wait(350);
     setStep('received', 'complete');
 
     setStep('correction', 'active');
-    await wait(500);
+    await wait(450);
     setStep('correction', 'complete');
 
     setStep('extraction', 'active');
-    const imageData = await loadImageData(file);
-    const wId = extractWatermark(imageData);
-    await wait(600);
+
+    let backendAudit = null;
+    let wId = null;
+
+    // 1. Primary: Send leaked photograph to Backend DWT + OpenCV forensics engine
+    try {
+      backendAudit = await auditUploadedImageWithBackend(file);
+      if (backendAudit && backendAudit.extracted_wid) {
+        wId = backendAudit.extracted_wid;
+      }
+    } catch (err) {
+      console.warn('Backend image forensics audit offline, trying local client extract:', err);
+    }
+
+    // 2. Fallback: Local client-side canvas extraction if backend did not extract
+    if (!wId) {
+      try {
+        const imageData = await loadImageData(file);
+        wId = extractWatermark(imageData);
+      } catch (err) {
+        console.warn('Local canvas watermark extract failed:', err);
+      }
+    }
+
+    await wait(400);
 
     if (!wId) {
       setStep('extraction', 'error');
@@ -76,39 +104,63 @@ export default function InvestigatorPortal() {
     setStep('wid', 'complete');
 
     setStep('query', 'active');
-    await wait(500);
+    await wait(450);
 
     let record = null;
     let valid = false;
 
-    // 1. Query DLT Ledger in Backend SQLite
-    try {
-      const backendAudit = await auditWidWithBackend(wId);
-      if (backendAudit && backendAudit.attribution_status === 'FOUND') {
-        const officersList = getOfficers();
-        const officerUid = backendAudit.parsed_receipt?.uid;
-        const officer = officersList.find((o) => o.uid === officerUid);
+    // If backend audit succeeded, build full attribution record
+    if (backendAudit && (backendAudit.attribution_status === 'FOUND' || backendAudit.attribution_status === 'FOUND_BUT_INVALID')) {
+      const officersList = getOfficers();
+      const officerUid = backendAudit.parsed_receipt?.uid;
+      const officer = officersList.find((o) => o.uid === officerUid);
 
-        record = {
-          ledgerId: `LR-${backendAudit.block_id || 1}`,
-          docId: backendAudit.parsed_receipt?.doc_id || 'DOC-CLASSIFIED',
-          officerUid: officerUid,
-          officerName: officer?.name || officerUid,
-          sessionId: 'SES-DLT-AUDIT',
-          receipt: backendAudit.client_receipt,
-          signature: backendAudit.client_signature,
-          wId: backendAudit.extracted_wid,
-          y_current: backendAudit.y_current,
-          timestamp: backendAudit.parsed_receipt?.timestamp ? Number(backendAudit.parsed_receipt.timestamp) * 1000 : Date.now(),
-          status: 'committed'
-        };
-        valid = backendAudit.signature_verified;
-      }
-    } catch (auditErr) {
-      console.warn('Backend forensic audit call failed, using local ledger records:', auditErr);
+      record = {
+        ledgerId: `LR-${backendAudit.block_id || 1}`,
+        docId: backendAudit.parsed_receipt?.doc_id || 'DOC-CLASSIFIED',
+        officerUid: officerUid,
+        officerName: officer?.name || (officerUid ? `Officer ${officerUid}` : 'Unknown Officer'),
+        sessionId: 'SES-DLT-AUDIT',
+        receipt: backendAudit.client_receipt,
+        signature: backendAudit.client_signature,
+        wId: backendAudit.extracted_wid,
+        y_current: backendAudit.y_current,
+        timestamp: backendAudit.parsed_receipt?.timestamp ? Number(backendAudit.parsed_receipt.timestamp) * 1000 : Date.now(),
+        status: 'committed'
+      };
+      valid = Boolean(backendAudit.signature_verified);
     }
 
-    // 2. Fall back to local ledger search if offline
+    // If backend did not find in ledger yet, try querying with extracted wId directly
+    if (!record && wId) {
+      try {
+        const auditRes = await auditWidWithBackend(wId);
+        if (auditRes && (auditRes.attribution_status === 'FOUND' || auditRes.attribution_status === 'FOUND_BUT_INVALID')) {
+          const officersList = getOfficers();
+          const officerUid = auditRes.parsed_receipt?.uid;
+          const officer = officersList.find((o) => o.uid === officerUid);
+
+          record = {
+            ledgerId: `LR-${auditRes.block_id || 1}`,
+            docId: auditRes.parsed_receipt?.doc_id || 'DOC-CLASSIFIED',
+            officerUid: officerUid,
+            officerName: officer?.name || (officerUid ? `Officer ${officerUid}` : 'Unknown Officer'),
+            sessionId: 'SES-DLT-AUDIT',
+            receipt: auditRes.client_receipt,
+            signature: auditRes.client_signature,
+            wId: auditRes.extracted_wid,
+            y_current: auditRes.y_current,
+            timestamp: auditRes.parsed_receipt?.timestamp ? Number(auditRes.parsed_receipt.timestamp) * 1000 : Date.now(),
+            status: 'committed'
+          };
+          valid = Boolean(auditRes.signature_verified);
+        }
+      } catch (err) {
+        console.warn('Backend audit W_ID query failed:', err);
+      }
+    }
+
+    // Final fallback to local localStorage ledger
     if (!record) {
       record = findLedgerRecordByWid(wId);
     }
@@ -122,14 +174,14 @@ export default function InvestigatorPortal() {
     }
 
     setStep('receipt', 'active');
-    await wait(500);
+    await wait(400);
     setStep('receipt', 'complete');
 
     setStep('verify', 'active');
     if (!valid) {
       valid = await verifyLedgerRecord(record);
     }
-    await wait(600);
+    await wait(500);
     setStep('verify', valid ? 'complete' : 'error');
 
     if (!valid) {
@@ -139,7 +191,7 @@ export default function InvestigatorPortal() {
     }
 
     setStep('attribution', 'active');
-    await wait(400);
+    await wait(350);
     setStep('attribution', 'complete');
 
     const investigation = { wId, record, verified: true };

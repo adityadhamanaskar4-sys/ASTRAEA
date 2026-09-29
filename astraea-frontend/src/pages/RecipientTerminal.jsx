@@ -42,7 +42,7 @@ export default function RecipientTerminal() {
     setStatuses({});
     setTimes({});
 
-    const { ledgerRecord, wId, doc } = await requestDecryption({
+    const res = await requestDecryption({
       docId: effectiveDocId,
       officerUid: actingOfficerUid,
       onStep: (key, status) => {
@@ -52,7 +52,13 @@ export default function RecipientTerminal() {
       },
     });
 
-    setActiveSession({ doc, wId, ledgerRecord });
+    setActiveSession({
+      doc: res.doc,
+      wId: res.wId,
+      ledgerRecord: res.ledgerRecord,
+      watermarkedImageBase64: res.watermarkedImageBase64,
+      decryptedContent: res.decryptedContent,
+    });
     setRunning(false);
     setDone(true);
   };

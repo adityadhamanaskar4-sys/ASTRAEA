@@ -63,7 +63,12 @@ export default function SecureViewer() {
 
           <div className="panel">
             <div className="viewer-frame">
-              <SecureCanvas ref={canvasRef} doc={activeSession.doc} wId={activeSession.wId} />
+              <SecureCanvas
+                ref={canvasRef}
+                doc={activeSession.doc}
+                wId={activeSession.wId}
+                watermarkedImageBase64={activeSession.watermarkedImageBase64}
+              />
             </div>
             <p className="small muted" style={{ marginTop: 14, lineHeight: 1.6 }}>
               Right-click and Ctrl+P are blocked here as a basic deterrent. These do not stop a

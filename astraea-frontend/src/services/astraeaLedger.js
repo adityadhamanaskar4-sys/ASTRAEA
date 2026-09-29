@@ -430,6 +430,30 @@ export async function auditWidWithBackend(wId) {
   return null;
 }
 
+export async function auditUploadedImageWithBackend(fileOrBase64) {
+  try {
+    if (typeof fileOrBase64 === 'string') {
+      const res = await fetch(`${API_BASE_URL}/audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: fileOrBase64 })
+      });
+      if (res.ok) return await res.json();
+    } else if (fileOrBase64 instanceof File || fileOrBase64 instanceof Blob) {
+      const formData = new FormData();
+      formData.append('file', fileOrBase64);
+      const res = await fetch(`${API_BASE_URL}/audit/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) return await res.json();
+    }
+  } catch (err) {
+    console.warn('Backend image audit failed:', err.message);
+  }
+  return null;
+}
+
 export function findLedgerRecordByWid(wId) {
   const state = loadState();
   return state.ledger.find((r) => r.wId === wId || (r.wId && r.wId.toLowerCase() === wId.toLowerCase())) || null;

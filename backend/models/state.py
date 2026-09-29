@@ -13,5 +13,6 @@ class PipelineStage(str, Enum):
 
 class AuditStatus(str, Enum):
     FOUND = "FOUND"
+    PARTIAL_MATCH = "PARTIAL_MATCH"
     FOUND_BUT_INVALID = "FOUND_BUT_INVALID"
     NOT_FOUND = "NOT_FOUND"

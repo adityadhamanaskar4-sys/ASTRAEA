@@ -108,9 +108,10 @@ export default function InvestigatorPortal() {
 
     let record = null;
     let valid = false;
+    let candidates = (backendAudit && backendAudit.candidates) || [];
 
-    // If backend audit succeeded, build full attribution record
-    if (backendAudit && (backendAudit.attribution_status === 'FOUND' || backendAudit.attribution_status === 'FOUND_BUT_INVALID')) {
+    // If backend audit succeeded (either exact FOUND or PARTIAL_MATCH)
+    if (backendAudit && (backendAudit.attribution_status === 'FOUND' || backendAudit.attribution_status === 'PARTIAL_MATCH' || backendAudit.attribution_status === 'FOUND_BUT_INVALID')) {
       const officersList = getOfficers();
       const officerUid = backendAudit.parsed_receipt?.uid;
       const officer = officersList.find((o) => o.uid === officerUid);
@@ -126,7 +127,9 @@ export default function InvestigatorPortal() {
         wId: backendAudit.extracted_wid,
         y_current: backendAudit.y_current,
         timestamp: backendAudit.parsed_receipt?.timestamp ? Number(backendAudit.parsed_receipt.timestamp) * 1000 : Date.now(),
-        status: 'committed'
+        status: 'committed',
+        similarityPercentage: candidates[0]?.similarity_percentage || 100.0,
+        matchType: candidates[0]?.match_type || 'EXACT_MATCH'
       };
       valid = Boolean(backendAudit.signature_verified);
     }
@@ -135,10 +138,11 @@ export default function InvestigatorPortal() {
     if (!record && wId) {
       try {
         const auditRes = await auditWidWithBackend(wId);
-        if (auditRes && (auditRes.attribution_status === 'FOUND' || auditRes.attribution_status === 'FOUND_BUT_INVALID')) {
+        if (auditRes && (auditRes.attribution_status === 'FOUND' || auditRes.attribution_status === 'PARTIAL_MATCH' || auditRes.attribution_status === 'FOUND_BUT_INVALID')) {
           const officersList = getOfficers();
           const officerUid = auditRes.parsed_receipt?.uid;
           const officer = officersList.find((o) => o.uid === officerUid);
+          if (auditRes.candidates) candidates = auditRes.candidates;
 
           record = {
             ledgerId: `LR-${auditRes.block_id || 1}`,
@@ -151,7 +155,9 @@ export default function InvestigatorPortal() {
             wId: auditRes.extracted_wid,
             y_current: auditRes.y_current,
             timestamp: auditRes.parsed_receipt?.timestamp ? Number(auditRes.parsed_receipt.timestamp) * 1000 : Date.now(),
-            status: 'committed'
+            status: 'committed',
+            similarityPercentage: candidates[0]?.similarity_percentage || 100.0,
+            matchType: candidates[0]?.match_type || 'EXACT_MATCH'
           };
           valid = Boolean(auditRes.signature_verified);
         }
@@ -168,7 +174,7 @@ export default function InvestigatorPortal() {
 
     if (!record) {
       setStep('receipt', 'error');
-      setOutcome({ level: 'extracted-only', wId });
+      setOutcome({ level: 'extracted-only', wId, candidates });
       setRunning(false);
       return;
     }
@@ -185,7 +191,7 @@ export default function InvestigatorPortal() {
     setStep('verify', valid ? 'complete' : 'error');
 
     if (!valid) {
-      setOutcome({ level: 'extracted-only', wId, record });
+      setOutcome({ level: 'extracted-only', wId, record, candidates });
       setRunning(false);
       return;
     }
@@ -194,9 +200,15 @@ export default function InvestigatorPortal() {
     await wait(350);
     setStep('attribution', 'complete');
 
-    const investigation = { wId, record, verified: true };
+    const isPartial = backendAudit?.attribution_status === 'PARTIAL_MATCH';
+    const investigation = { wId, record, candidates, verified: true, isPartial };
     setInvestigation(investigation);
-    setOutcome({ level: 'attributed', wId, record });
+    setOutcome({
+      level: isPartial ? 'partial' : 'attributed',
+      wId,
+      record,
+      candidates
+    });
     setRunning(false);
   };
 
@@ -208,7 +220,7 @@ export default function InvestigatorPortal() {
         <p className="page-desc">
           Upload a suspected leak. Recovering a mark from the image is only half the story — it
           only becomes attribution once it is matched to a committed ledger record with a valid
-          signature.
+          signature. Supports partial and corrupted watermark matching.
         </p>
       </div>
 
@@ -237,10 +249,65 @@ export default function InvestigatorPortal() {
             </p>
           )}
 
-          {outcome?.level === 'attributed' && (
+          {outcome?.level === 'partial' && (
+            <p className="small" style={{ color: 'var(--amber)', marginTop: 12 }}>
+              Partial watermark recovered ({outcome.record?.similarityPercentage}% similarity). Correlated against ledger records below.
+            </p>
+          )}
+
+          {(outcome?.level === 'attributed' || outcome?.level === 'partial') && (
             <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => navigate('/attribution')}>
-              View attribution result
+              View attribution case file
             </button>
+          )}
+
+          {outcome?.candidates && outcome.candidates.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div className="panel-title" style={{ fontSize: '14px', marginBottom: 8 }}>
+                Potential Recipients Ranked by Watermark Similarity
+              </div>
+              <p className="small muted" style={{ marginBottom: 12 }}>
+                The extracted mark was compared against all committed ledger states using bit-level Hamming distance.
+              </p>
+              <div className="stack">
+                {outcome.candidates.map((cand, idx) => (
+                  <div
+                    key={cand.block_id + '-' + idx}
+                    className="spread"
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: '6px',
+                      background: idx === 0 ? 'rgba(46, 204, 113, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                      border: idx === 0 ? '1px solid rgba(46, 204, 113, 0.35)' : '1px solid rgba(255, 255, 255, 0.1)',
+                      marginBottom: 8
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                        #{idx + 1} {cand.officer_name || `Officer ${cand.officer_uid}`}
+                        <span className="mono muted small" style={{ marginLeft: 8 }}>{cand.officer_uid}</span>
+                      </div>
+                      <div className="small muted" style={{ marginTop: 4 }}>
+                        Doc: <span className="mono">{cand.doc_id}</span> | Block #{cand.block_id} | {cand.matching_bits} bits ({cand.match_type})
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span
+                        className="mono"
+                        style={{
+                          fontSize: '16px',
+                          fontWeight: 700,
+                          color: cand.similarity_percentage >= 90 ? 'var(--green, #2ecc71)' : (cand.similarity_percentage >= 60 ? 'var(--amber, #f39c12)' : 'var(--muted, #888)')
+                        }}
+                      >
+                        {cand.similarity_percentage}%
+                      </span>
+                      <div className="small muted">similarity</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

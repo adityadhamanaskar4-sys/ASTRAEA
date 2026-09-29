@@ -354,6 +354,15 @@ class ASTRAEAPipelineService:
 
         sig_verified = bool(audit_raw.get("signature_verified"))
 
+        # Enrich candidates with registered user names
+        candidates_raw = audit_raw.get("candidates", [])
+        enriched_candidates = []
+        for cand in candidates_raw:
+            c = dict(cand)
+            user_entry = self.sqlite_store.get_user(c.get("officer_uid"))
+            c["officer_name"] = user_entry["name"] if user_entry else f"Officer {c.get('officer_uid')}"
+            enriched_candidates.append(c)
+
         return AuditResponse(
             attribution_status=status_enum,
             extracted_wid=extracted_wid,
@@ -363,7 +372,8 @@ class ASTRAEAPipelineService:
             y_current=audit_raw.get("y_current"),
             parsed_receipt=audit_raw.get("parsed_receipt"),
             signature_verified=sig_verified,
-            message=audit_raw.get("message", "Audit query complete.")
+            message=audit_raw.get("message", "Audit query complete."),
+            candidates=enriched_candidates
         )
 
     def _create_reference_canvas(self, title: str, classification: str, text_content: str) -> np.ndarray:

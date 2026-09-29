@@ -46,6 +46,7 @@ class AuditResponse(BaseModel):
     parsed_receipt: Optional[Dict[str, str]] = None
     signature_verified: bool = False
     message: str
+    candidates: Optional[List[Dict[str, Any]]] = None
 
 class DocumentMetadataResponse(BaseModel):
     doc_id: str

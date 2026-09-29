@@ -50,19 +50,20 @@ class ChainIntegrityReport(BaseModel):
 
 class ForensicAuditRequest(BaseModel):
     """Request payload to query the ledger using an extracted watermark ID."""
-    extracted_wid: str = Field(..., min_length=64, max_length=64, description="256-bit hex watermark recovered from leak")
+    extracted_wid: str = Field(..., min_length=1, description="Hex watermark or fragment recovered from leak")
 
 class ForensicAuditResponse(BaseModel):
     """Cryptographic attribution response for a forensic leak investigation."""
-    attribution_status: str = Field(..., description="'FOUND', 'FOUND_BUT_INVALID', or 'NOT_FOUND'")
+    attribution_status: str = Field(..., description="'FOUND', 'PARTIAL_MATCH', 'FOUND_BUT_INVALID', or 'NOT_FOUND'")
     extracted_wid: str = Field(..., description="Watermark ID searched")
-    block_id: Optional[int] = Field(None, description="Block index where match was found")
+    block_id: Optional[int] = Field(None, description="Block index where top match was found")
     client_receipt: Optional[str] = Field(None, description="Attributed intent receipt (UID || DocID || Timestamp)")
     client_signature: Optional[str] = Field(None, description="Hex signature attached to the receipt")
     y_current: Optional[str] = Field(None, description="Committed ledger state at the time of decryption")
     parsed_receipt: Optional[Dict[str, str]] = Field(default_factory=dict, description="Parsed UID, DocID, Timestamp")
     signature_verified: Optional[bool] = Field(None, description="Whether ML-DSA signature verification succeeded")
     message: str = Field(..., description="Summary of attribution finding")
+    candidates: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Ranked list of candidate officers matching or similar to W_ID*")
 
 class NodeStatusResponse(BaseModel):
     """Status and health of the local DLT node."""

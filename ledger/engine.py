@@ -362,27 +362,75 @@ class LedgerEngine:
     # =========================================================================
     # FORENSIC AUDIT: Leak Attribution by Watermark ID
     # =========================================================================
+    @staticmethod
+    def _compute_wid_similarity(extracted_hex: str, candidate_hex: str) -> tuple[float, int, int, str]:
+        """
+        Computes the cryptographic similarity between an extracted (possibly incomplete or noisy)
+        watermark ID and a candidate ledger watermark ID.
+        Returns:
+            (similarity_percentage, matching_bits, total_bits_evaluated, match_type)
+        """
+        ext = extracted_hex.strip().lower()
+        cand = candidate_hex.strip().lower()
+
+        # 1. Exact equality
+        if ext == cand:
+            return 100.0, 256, 256, "EXACT_MATCH"
+
+        # 2. Exact prefix match (e.g. partial prefix recovered from document)
+        if len(ext) >= 8 and cand.startswith(ext):
+            pct = round((len(ext) / len(cand)) * 100.0, 1)
+            return 100.0, len(ext) * 4, len(ext) * 4, f"PREFIX_MATCH ({len(ext)}/64 chars, {pct}% coverage)"
+
+        # 3. Exact substring match (fragment recovered from middle)
+        if len(ext) >= 8 and ext in cand:
+            pct = round((len(ext) / len(cand)) * 100.0, 1)
+            return 98.0, len(ext) * 4, len(ext) * 4, f"SUBSTRING_MATCH ({len(ext)}/64 chars, {pct}% coverage)"
+
+        # 4. Bit-level Hamming comparison
+        def hex_to_bits(h_str):
+            bits = []
+            for ch in h_str:
+                try:
+                    bits.append(f"{int(ch, 16):04b}")
+                except ValueError:
+                    pass
+            return "".join(bits)
+
+        b_ext = hex_to_bits(ext)
+        b_cand = hex_to_bits(cand)
+        min_len = min(len(b_ext), len(b_cand))
+
+        if min_len == 0:
+            return 0.0, 0, 256, "NO_OVERLAP"
+
+        matching_bits = sum(1 for x, y in zip(b_ext[:min_len], b_cand[:min_len]) if x == y)
+        bit_acc = (matching_bits / min_len) * 100.0
+
+        if len(b_ext) == len(b_cand) == 256:
+            return round(bit_acc, 1), matching_bits, 256, f"BIT_SIMILARITY ({matching_bits}/256 bits)"
+        else:
+            coverage = min_len / 256.0
+            weighted_score = (bit_acc * 0.7) + (coverage * 100.0 * 0.3)
+            return round(weighted_score, 1), matching_bits, min_len, f"PARTIAL_BIT_SIMILARITY ({matching_bits}/{min_len} bits)"
+
     def audit_forensic_wid(self, extracted_wid: str) -> ForensicAuditResponse:
         """
         Traverses the ledger to resolve a physical leak by its recovered 256-bit watermark ID (W_ID*).
-        
-        Per MFHC_Understand.md Section 2.D:
-        1. Iterates over all committed blocks.
-        2. Recalculates W_expected = BLAKE3(sigma_u || y_i).
-        3. If W_expected == extracted_W_ID:
-           - Recovers client_receipt and client_signature.
-           - Parses UID, DocID, Timestamp.
-           - Cryptographically verifies attribution.
+        Supports full 256-bit W_ID, partial prefixes/substrings, and noisy/corrupted marks.
+        Ranks and lists all similar candidate officers.
         """
         clean_wid = extracted_wid.strip().lower()
-        if len(clean_wid) != 64:
+        if not clean_wid:
             return ForensicAuditResponse(
                 attribution_status="NOT_FOUND",
                 extracted_wid=extracted_wid,
-                message="Invalid watermark ID length: must be a 64-character (256-bit) hex string."
+                message="Extracted watermark ID is empty.",
+                candidates=[]
             )
 
         audit_blocks = self.db.get_all_blocks_for_audit()
+        candidates = []
 
         for block in audit_blocks:
             try:
@@ -393,38 +441,95 @@ class LedgerEngine:
             y_i_hex = block["y_current"]
             computed_wid = ForensicIDEngine.derive_forensic_id(sig_bytes, y_i_hex).lower()
 
-            if computed_wid == clean_wid:
-                # Match found!
-                parsed = self._parse_receipt(block["client_receipt"])
-                
-                # Check signature authenticity
-                is_sig_valid = self._verify_client_signature(
-                    block["client_receipt"],
-                    sig_bytes,
-                    recipient_pk_bytes=None
-                )
+            sim_pct, matching_bits, total_bits, match_type = self._compute_wid_similarity(clean_wid, computed_wid)
+            parsed = self._parse_receipt(block["client_receipt"])
 
-                status = "FOUND" if is_sig_valid else "FOUND_BUT_INVALID"
+            is_sig_valid = self._verify_client_signature(
+                block["client_receipt"],
+                sig_bytes,
+                recipient_pk_bytes=None
+            )
 
-                return ForensicAuditResponse(
-                    attribution_status=status,
-                    extracted_wid=extracted_wid,
-                    block_id=block["block_id"],
-                    client_receipt=block["client_receipt"],
-                    client_signature=block["client_signature"],
-                    y_current=y_i_hex,
-                    parsed_receipt=parsed,
-                    signature_verified=is_sig_valid,
-                    message=(
-                        f"Leak successfully attributed to Officer {parsed.get('uid', 'UNKNOWN')} "
-                        f"for Document {parsed.get('doc_id', 'UNKNOWN')} committed at Block #{block['block_id']}."
-                    )
-                )
+            candidate_info = {
+                "officer_uid": parsed.get("uid", "UNKNOWN"),
+                "doc_id": parsed.get("doc_id", "UNKNOWN"),
+                "block_id": block["block_id"],
+                "timestamp": block["timestamp"],
+                "computed_wid": computed_wid,
+                "similarity_percentage": sim_pct,
+                "matching_bits": f"{matching_bits}/{total_bits}",
+                "match_type": match_type,
+                "signature_verified": is_sig_valid,
+                "client_receipt": block["client_receipt"],
+                "client_signature": block["client_signature"],
+                "y_current": y_i_hex,
+                "parsed_receipt": parsed
+            }
+            candidates.append(candidate_info)
+
+        # Sort candidates by similarity descending
+        candidates.sort(key=lambda c: (c["similarity_percentage"], c["block_id"]), reverse=True)
+
+        if not candidates:
+            return ForensicAuditResponse(
+                attribution_status="NOT_FOUND",
+                extracted_wid=extracted_wid,
+                message="Ledger contains no committed access blocks.",
+                candidates=[]
+            )
+
+        top = candidates[0]
+
+        # Case 1: Exact Match (100% on 64 chars)
+        if top["similarity_percentage"] == 100.0 and len(clean_wid) == 64:
+            status = "FOUND" if top["signature_verified"] else "FOUND_BUT_INVALID"
+            return ForensicAuditResponse(
+                attribution_status=status,
+                extracted_wid=extracted_wid,
+                block_id=top["block_id"],
+                client_receipt=top["client_receipt"],
+                client_signature=top["client_signature"],
+                y_current=top["y_current"],
+                parsed_receipt=top["parsed_receipt"],
+                signature_verified=top["signature_verified"],
+                message=(
+                    f"Leak successfully attributed to Officer {top['officer_uid']} "
+                    f"for Document {top['doc_id']} committed at Block #{top['block_id']}."
+                ),
+                candidates=candidates
+            )
+
+        # Case 2: Partial Match:
+        # A partial match happens if:
+        # - It is an exact prefix or substring match of >= 8 characters
+        # - OR it has statistically significant bit similarity (>= 80.0%), indicating a noisy/degraded 256-bit mark.
+        is_prefix_or_substr = "PREFIX" in top["match_type"] or "SUBSTRING" in top["match_type"]
+        is_high_bit_similarity = top["similarity_percentage"] >= 80.0
+
+        if is_prefix_or_substr or is_high_bit_similarity:
+            status = "PARTIAL_MATCH"
+            return ForensicAuditResponse(
+                attribution_status=status,
+                extracted_wid=extracted_wid,
+                block_id=top["block_id"],
+                client_receipt=top["client_receipt"],
+                client_signature=top["client_signature"],
+                y_current=top["y_current"],
+                parsed_receipt=top["parsed_receipt"],
+                signature_verified=top["signature_verified"],
+                message=(
+                    f"Partial watermark match ({top['similarity_percentage']}% similarity, {top['match_type']}): "
+                    f"Highest probability attributed to Officer {top['officer_uid']} "
+                    f"for Document {top['doc_id']} at Block #{top['block_id']}."
+                ),
+                candidates=candidates
+            )
 
         return ForensicAuditResponse(
             attribution_status="NOT_FOUND",
             extracted_wid=extracted_wid,
-            message="No ledger record matches the extracted watermark ID."
+            message="No ledger record matches or closely resembles the extracted watermark ID.",
+            candidates=candidates
         )
 
     def get_status(self) -> NodeStatusResponse:

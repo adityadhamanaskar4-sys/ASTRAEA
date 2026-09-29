@@ -380,25 +380,12 @@ class ASTRAEAPipelineService:
 
     def _create_reference_canvas(self, title: str, classification: str, text_content: str) -> np.ndarray:
         """Renders an unwatermarked reference canvas for guided sub-pixel homography alignment."""
-        from PIL import Image, ImageDraw
-        from ml.embed import EMBED_W, EMBED_H
-        img = Image.new("RGB", (EMBED_W, EMBED_H), color=(255, 255, 255))
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([12, 12, EMBED_W - 12, EMBED_H - 12], outline=(0, 0, 0), width=3)
-        draw.rectangle([12, 12, EMBED_W - 12, 80], fill=(0, 0, 0))
-        draw.text(
-            (40, 26),
-            f"[{classification}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM",
-            fill=(255, 255, 255)
+        return self.watermark_engine.render_security_document_canvas(
+            title=title,
+            classification=classification,
+            text_content=text_content,
+            wid_hex=None
         )
-        draw.text((50, 115), f"DOCUMENT: {title}", fill=(0, 0, 0))
-        draw.line([(50, 155), (EMBED_W - 50, 155)], fill=(0, 0, 0), width=2)
-        lines = text_content.split("\n")
-        y_offset = 185
-        for line in lines:
-            draw.text((50, y_offset), line, fill=(0, 0, 0))
-            y_offset += 32
-        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
     def list_documents(self) -> List[DocumentMetadataResponse]:
         """Lists all distributed document metadata."""

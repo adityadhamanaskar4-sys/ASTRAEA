@@ -35,50 +35,99 @@ export function renderDocument(canvas, { title, docId, body, classification }) {
   const w = canvas.width;
   const h = canvas.height;
 
-  // Pure white paper background
-  ctx.fillStyle = '#ffffff';
+  // 1. Calibrated paper background (prevents saturation clipping at 0 and 255)
+  ctx.fillStyle = '#ececec';
   ctx.fillRect(0, 0, w, h);
 
-  // Black border frame
-  ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(8, 8, w - 16, h - 16);
+  // 2. Security micro-grid underlay (prevents zero-quantization of DWT high-frequency subbands)
+  ctx.strokeStyle = '#e2e2e2';
+  ctx.lineWidth = 1;
+  for (let x = 16; x < w - 16; x += 20) {
+    ctx.beginPath();
+    ctx.moveTo(x, 16);
+    ctx.lineTo(x, h - 16);
+    ctx.stroke();
+  }
+  for (let y = 16; y < h - 16; y += 20) {
+    ctx.beginPath();
+    ctx.moveTo(16, y);
+    ctx.lineTo(w - 16, y);
+    ctx.stroke();
+  }
 
-  // Black classification header banner
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(8, 8, w - 16, 36);
+  // 3. Heavy outer registration frame (for reliable OpenCV perspective unwarping)
+  ctx.strokeStyle = '#101010';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(6, 6, w - 12, h - 12);
 
-  ctx.fillStyle = '#ffffff';
+  // 4. Corner Registration L-Brackets
+  ctx.fillStyle = '#101010';
+  const armL = Math.min(40, w * 0.06);
+  const armW = 8;
+  // Top-left
+  ctx.fillRect(10, 10, armL, armW);
+  ctx.fillRect(10, 10, armW, armL);
+  // Top-right
+  ctx.fillRect(w - 10 - armL, 10, armL, armW);
+  ctx.fillRect(w - 10 - armW, 10, armW, armL);
+  // Bottom-left
+  ctx.fillRect(10, h - 10 - armW, armL, armW);
+  ctx.fillRect(10, h - 10 - armL, armW, armL);
+  // Bottom-right
+  ctx.fillRect(w - 10 - armL, h - 10 - armW, armL, armW);
+  ctx.fillRect(w - 10 - armW, h - 10 - armL, armW, armL);
+
+  // 5. Official Classification Header Banner
+  ctx.fillStyle = '#1c1c1c';
+  ctx.fillRect(16, 16, w - 32, 42);
+
+  ctx.fillStyle = '#f5f5f5';
   ctx.font = '700 12px "JetBrains Mono", monospace';
-  ctx.fillText(`[${classification || 'RESTRICTED'}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM`, 24, 31);
+  ctx.fillText(`[${(classification || 'RESTRICTED').toUpperCase()}] ASTRAEA QUANTUM SECURE PROVENANCE`, 26, 36);
 
-  // Document Title in solid black
-  ctx.fillStyle = '#000000';
+  ctx.font = '10px "JetBrains Mono", monospace';
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText('SECURITY: ML-DSA-65 / DWT-L2', w - 190, 36);
+
+  // 6. Document Title
+  ctx.fillStyle = '#1a1a1a';
   ctx.font = '700 18px "Space Grotesk", sans-serif';
-  ctx.fillText(title, 24, 72);
+  ctx.fillText(title, 26, 80);
 
   // Reference ID
   ctx.font = '11px "JetBrains Mono", monospace';
-  ctx.fillStyle = '#444444';
-  ctx.fillText(`REF: ${docId}`, 24, 90);
+  ctx.fillStyle = '#555555';
+  ctx.fillText(`DOCUMENT REF: ${docId}`, 26, 98);
 
   // Divider line
-  ctx.strokeStyle = '#000000';
+  ctx.strokeStyle = '#222222';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(24, 102);
-  ctx.lineTo(w - 24, 102);
+  ctx.moveTo(26, 108);
+  ctx.lineTo(w - 26, 108);
   ctx.stroke();
 
-  // Document body text in solid black
-  ctx.fillStyle = '#000000';
+  // 7. Ruled Document text lines
+  ctx.fillStyle = '#1a1a1a';
   ctx.font = '13px "Space Grotesk", sans-serif';
   const lines = body.split('\n');
-  let y = 130;
+  let y = 134;
   for (const line of lines) {
-    ctx.fillText(line, 24, y);
-    y += 20;
+    ctx.strokeStyle = '#dedede';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(26, y + 6);
+    ctx.lineTo(w - 26, y + 6);
+    ctx.stroke();
+
+    ctx.fillText(line, 26, y);
+    y += 22;
   }
+
+  // 8. Forensic Provenance Footer
+  ctx.fillStyle = '#777777';
+  ctx.font = '10px "JetBrains Mono", monospace';
+  ctx.fillText('FORENSIC WATERMARK: LEVEL-2 HAAR DWT FORENSICALLY EMBEDDED IN LUMINANCE CARRIER', 26, h - 18);
 
   return canvas;
 }

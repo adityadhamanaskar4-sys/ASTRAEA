@@ -25,19 +25,19 @@ def order_points(points):
     return ordered
 
 
-def four_point_transform(image, points):
+def four_point_transform(image, points, target_w=TARGET_WIDTH, target_h=TARGET_HEIGHT):
     """
     Perspective-correct the detected artifact
-    and normalize it to 3840 x 2160.
+    and normalize it using high-fidelity LANCZOS4 interpolation.
     """
 
     rect = order_points(points)
 
     destination = np.array([
         [0, 0],
-        [TARGET_WIDTH - 1, 0],
-        [TARGET_WIDTH - 1, TARGET_HEIGHT - 1],
-        [0, TARGET_HEIGHT - 1]
+        [target_w - 1, 0],
+        [target_w - 1, target_h - 1],
+        [0, target_h - 1]
     ], dtype=np.float32)
 
     matrix = cv2.getPerspectiveTransform(
@@ -48,7 +48,8 @@ def four_point_transform(image, points):
     corrected = cv2.warpPerspective(
         image,
         matrix,
-        (TARGET_WIDTH, TARGET_HEIGHT)
+        (target_w, target_h),
+        flags=cv2.INTER_LANCZOS4
     )
 
     return corrected
@@ -56,7 +57,7 @@ def four_point_transform(image, points):
 
 def detect_artifact(image):
     """
-    Detect the rectangular image displayed
+    Detect the rectangular/trapezoidal image displayed
     on the laptop screen.
     """
 
@@ -94,8 +95,14 @@ def detect_artifact(image):
         if rectangularity < 0.40:
             continue
 
-        box = cv2.boxPoints(rectangle)
-        candidates.append((area, np.array(box, dtype=np.float32)))
+        # Try true 4-point quadrilateral polygon approximation first for perspective skew
+        peri = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+        if len(approx) == 4:
+            candidates.append((area, approx.reshape(4, 2).astype(np.float32)))
+        else:
+            box = cv2.boxPoints(rectangle)
+            candidates.append((area, np.array(box, dtype=np.float32)))
 
     if candidates:
         candidates.sort(key=lambda x: x[0], reverse=True)

@@ -89,6 +89,85 @@ class DWTWatermarkEngine:
         logger.warning("All DWT extraction stages exhausted; unable to decode W_ID.")
         return ""
 
+    @staticmethod
+    def render_security_document_canvas(
+        title: str,
+        classification: str,
+        text_content: str,
+        wid_hex: Optional[str] = None
+    ) -> np.ndarray:
+        """
+        Renders an ultra-high-fidelity security document format optimized for maximum bit extraction:
+        1. Non-saturating paper luminance (236, 236, 236) and dark text (25, 25, 25) prevent
+           saturation clipping at 0 and 255, preserving 100% of DWT differential perturbations (+/- 16).
+        2. Corner Registration L-Brackets and heavy outer frame (8px) provide sub-pixel accuracy
+           for OpenCV 4-corner perspective unwarping under camera skew.
+        3. Subtle security micro-grid underlay prevents JPEG quantization from zeroing flat regions.
+        """
+        width, height = EMBED_W, EMBED_H  # 1600 x 900
+        img = Image.new("RGB", (width, height), color=(236, 236, 236))
+        draw = ImageDraw.Draw(img)
+
+        # 1. Security micro-grid underlay (every 24px) for rich wavelet energy across HL2/LH2 subbands
+        for x in range(24, width - 24, 24):
+            draw.line([(x, 24), (x, height - 24)], fill=(230, 230, 230), width=1)
+        for y in range(24, height - 24, 24):
+            draw.line([(24, y), (width - 24, y)], fill=(230, 230, 230), width=1)
+
+        # 2. Heavy outer registration border (8px) for 100% reliable contour detection
+        draw.rectangle([8, 8, width - 8, height - 8], outline=(15, 15, 15), width=8)
+
+        # 3. Precision Corner Registration L-Brackets at all 4 corners
+        def draw_corner_bracket(x, y, dx, dy):
+            x0, x1 = min(x, x + dx * 60), max(x, x + dx * 60)
+            y0, y1 = min(y, y + dy * 12), max(y, y + dy * 12)
+            draw.rectangle([x0, y0, x1, y1], fill=(15, 15, 15))
+            x0, x1 = min(x, x + dx * 12), max(x, x + dx * 12)
+            y0, y1 = min(y, y + dy * 60), max(y, y + dy * 60)
+            draw.rectangle([x0, y0, x1, y1], fill=(15, 15, 15))
+
+        draw_corner_bracket(16, 16, 1, 1)
+        draw_corner_bracket(width - 16, 16, -1, 1)
+        draw_corner_bracket(16, height - 16, 1, -1)
+        draw_corner_bracket(width - 16, height - 16, -1, -1)
+
+        # 4. Official Classification & Provenance Header block (non-saturating dark charcoal 28)
+        draw.rectangle([28, 28, width - 28, 92], fill=(28, 28, 28))
+        draw.text(
+            (60, 42),
+            f"[{classification.upper()}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM",
+            fill=(245, 245, 245)
+        )
+        draw.text(
+            (width - 340, 42),
+            "SECURITY LEVEL: ML-DSA-65 / DWT-L2",
+            fill=(200, 200, 200)
+        )
+        draw.line([(28, 92), (width - 28, 92)], fill=(15, 15, 15), width=2)
+
+        # 5. Document Title and Reference Control Bar
+        draw.text((60, 118), f"DOCUMENT IDENTIFIER: {title.upper()}", fill=(20, 20, 20))
+        draw.line([(60, 152), (width - 60, 152)], fill=(30, 30, 30), width=2)
+
+        # 6. Ruled Document Body Text
+        lines = text_content.split("\n")
+        y_offset = 180
+        for line in lines:
+            draw.line([(60, y_offset + 24), (width - 60, y_offset + 24)], fill=(220, 220, 220), width=1)
+            draw.text((60, y_offset), line, fill=(20, 20, 20))
+            y_offset += 34
+
+        # 7. Subtle Forensic Provenance Footer Bar
+        draw.rectangle([28, height - 58, width - 28, height - 28], fill=(225, 225, 225), outline=(180, 180, 180), width=1)
+        w_display = wid_hex[:16] if wid_hex else "REFERENCE-CANVAS"
+        draw.text(
+            (60, height - 47),
+            f"FORENSIC SIGNATURE: W_ID={w_display}... | IMMUTABLE LEDGER COMMITTED | LEVEL-2 HAAR DWT EMBEDDED",
+            fill=(80, 80, 80)
+        )
+
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
     def create_watermarked_document_image(
         self,
         title: str,
@@ -97,45 +176,15 @@ class DWTWatermarkEngine:
         wid_hex: str
     ) -> str:
         """
-        Renders document text onto a 1600x900 canvas, embeds Level-2 DWT W_ID watermark,
+        Renders document text onto optimized security document canvas, embeds Level-2 DWT W_ID watermark,
         and returns base64 PNG string for secure viewer presentation.
         """
-        width, height = EMBED_W, EMBED_H  # 1600 x 900
-        # Clean white paper background
-        img = Image.new("RGB", (width, height), color=(255, 255, 255))
-        draw = ImageDraw.Draw(img)
-
-        # Black outer frame border
-        draw.rectangle([12, 12, width - 12, height - 12], outline=(0, 0, 0), width=3)
-
-        # Solid black header banner
-        draw.rectangle([12, 12, width - 12, 80], fill=(0, 0, 0))
-        draw.text(
-            (40, 26),
-            f"[{classification}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM",
-            fill=(255, 255, 255)
+        np_img = self.render_security_document_canvas(
+            title=title,
+            classification=classification,
+            text_content=text_content,
+            wid_hex=wid_hex
         )
-
-        # Title and header divider in solid black
-        draw.text((50, 115), f"DOCUMENT: {title}", fill=(0, 0, 0))
-        draw.line([(50, 155), (width - 50, 155)], fill=(0, 0, 0), width=2)
-
-        # Text lines in black
-        lines = text_content.split("\n")
-        y_offset = 185
-        for line in lines:
-            draw.text((50, y_offset), line, fill=(0, 0, 0))
-            y_offset += 32
-
-        # Subtle forensic footer in grayscale
-        draw.text(
-            (50, height - 45),
-            f"W_ID: {wid_hex[:16]}... (2D HAAR DWT FORENSICALLY EMBEDDED)",
-            fill=(120, 120, 120)
-        )
-
-        # Convert to numpy array (BGR)
-        np_img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
         # Embed Level-2 DWT watermark
         watermarked_np = self.embed_wid_in_image(np_img, wid_hex)

@@ -101,38 +101,37 @@ class DWTWatermarkEngine:
         and returns base64 PNG string for secure viewer presentation.
         """
         width, height = EMBED_W, EMBED_H  # 1600 x 900
-        img = Image.new("RGB", (width, height), color=(248, 249, 250))
+        # Clean white paper background
+        img = Image.new("RGB", (width, height), color=(255, 255, 255))
         draw = ImageDraw.Draw(img)
 
-        # Header banner
-        header_color = (
-            (185, 28, 28) if classification == "RESTRICTED"
-            else ((217, 119, 6) if classification == "CONFIDENTIAL"
-            else (30, 41, 59))
-        )
-        draw.rectangle([0, 0, width, 80], fill=header_color)
+        # Black outer frame border
+        draw.rectangle([12, 12, width - 12, height - 12], outline=(0, 0, 0), width=3)
+
+        # Solid black header banner
+        draw.rectangle([12, 12, width - 12, 80], fill=(0, 0, 0))
         draw.text(
             (40, 26),
             f"[{classification}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM",
             fill=(255, 255, 255)
         )
 
-        # Title and header divider
-        draw.text((50, 115), f"DOCUMENT: {title}", fill=(20, 20, 20))
-        draw.line([(50, 155), (width - 50, 155)], fill=(200, 200, 200), width=2)
+        # Title and header divider in solid black
+        draw.text((50, 115), f"DOCUMENT: {title}", fill=(0, 0, 0))
+        draw.line([(50, 155), (width - 50, 155)], fill=(0, 0, 0), width=2)
 
-        # Text lines
+        # Text lines in black
         lines = text_content.split("\n")
         y_offset = 185
         for line in lines:
-            draw.text((50, y_offset), line, fill=(35, 35, 35))
+            draw.text((50, y_offset), line, fill=(0, 0, 0))
             y_offset += 32
 
-        # Subtle forensic footer
+        # Subtle forensic footer in grayscale
         draw.text(
             (50, height - 45),
             f"W_ID: {wid_hex[:16]}... (2D HAAR DWT FORENSICALLY EMBEDDED)",
-            fill=(180, 180, 180)
+            fill=(120, 120, 120)
         )
 
         # Convert to numpy array (BGR)

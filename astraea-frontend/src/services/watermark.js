@@ -35,38 +35,49 @@ export function renderDocument(canvas, { title, docId, body, classification }) {
   const w = canvas.width;
   const h = canvas.height;
 
-  ctx.fillStyle = '#f4f1e8';
+  // Pure white paper background
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, w, h);
 
-  ctx.strokeStyle = '#c9a227';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(10, 10, w - 20, h - 20);
+  // Black border frame
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(8, 8, w - 16, h - 16);
 
-  ctx.fillStyle = '#8a1f1f';
-  ctx.font = '600 13px "JetBrains Mono", monospace';
-  ctx.fillText(classification || 'RESTRICTED', 28, 40);
+  // Black classification header banner
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(8, 8, w - 16, 36);
 
-  ctx.fillStyle = '#1b1b1b';
-  ctx.font = '700 20px "Space Grotesk", sans-serif';
-  ctx.fillText(title, 28, 74);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 12px "JetBrains Mono", monospace';
+  ctx.fillText(`[${classification || 'RESTRICTED'}] ASTRAEA QUANTUM SECURE PROVENANCE SYSTEM`, 24, 31);
 
-  ctx.font = '12px "JetBrains Mono", monospace';
-  ctx.fillStyle = '#555';
-  ctx.fillText(`REF ${docId}`, 28, 94);
+  // Document Title in solid black
+  ctx.fillStyle = '#000000';
+  ctx.font = '700 18px "Space Grotesk", sans-serif';
+  ctx.fillText(title, 24, 72);
 
-  ctx.strokeStyle = '#d8d2bf';
+  // Reference ID
+  ctx.font = '11px "JetBrains Mono", monospace';
+  ctx.fillStyle = '#444444';
+  ctx.fillText(`REF: ${docId}`, 24, 90);
+
+  // Divider line
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(28, 106);
-  ctx.lineTo(w - 28, 106);
+  ctx.moveTo(24, 102);
+  ctx.lineTo(w - 24, 102);
   ctx.stroke();
 
-  ctx.fillStyle = '#2a2a2a';
+  // Document body text in solid black
+  ctx.fillStyle = '#000000';
   ctx.font = '13px "Space Grotesk", sans-serif';
   const lines = body.split('\n');
-  let y = 132;
+  let y = 130;
   for (const line of lines) {
-    ctx.fillText(line, 28, y);
-    y += 22;
+    ctx.fillText(line, 24, y);
+    y += 20;
   }
 
   return canvas;
